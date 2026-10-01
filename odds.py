@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
-from aces import betano, db, model
+from aces import betano, db, events, model
 from aces.players import Players
 
 log = logging.getLogger("odds")
@@ -75,34 +75,51 @@ def best_line(pmf, rungs: list[tuple[int, float]], can_advise: bool):
     return (*even, False)
 
 
+# Tours whose model has passed a walk-forward backtest. Lines of other tours
+# are priced and stored - for the comparison page - but never advised.
+VALIDATED_TOURS = {"WTA"}
+
+
 def run(conn, dry_run: bool, advise: bool):
-    players = Players(conn)
-    hist = model.load(conn)
-    ratings = model.walk(hist)
-    seen = hist.player_a_id.value_counts().add(hist.player_b_id.value_counts(), fill_value=0)
-    log.info("ratings from %d matches up to %s", len(hist), hist.played_at.max())
+    tours = {}
+    for tour in ("WTA", "ATP"):
+        hist = model.load(conn, tour)
+        if hist.empty:
+            continue
+        tours[tour] = {
+            "players": Players(conn, tour), "ratings": model.walk(hist),
+            "seen": hist.player_a_id.value_counts().add(hist.player_b_id.value_counts(), fill_value=0)}
+        log.info("%s ratings from %d matches up to %s", tour, len(hist), hist.played_at.max())
 
     fetched_at = datetime.now(timezone.utc)
     counts = {"events": 0, "unmatched": 0, "priced": 0, "advised": 0}
-    for league in betano.wta_leagues():
+    for league in betano.leagues():
+        T = tours.get(league["tour"])
         for ev in betano.league_events(league):
             counts["events"] += 1
-            ev["player_1_id"] = players.by_full_name(ev["name_1"])
-            ev["player_2_id"] = players.by_full_name(ev["name_2"])
+            P = T["players"] if T else None
+            ev["player_1_id"] = P.by_full_name(ev["name_1"]) if P else None
+            ev["player_2_id"] = P.by_full_name(ev["name_2"]) if P else None
             ev["surface"] = surface_for(conn, ev)
+            ev["match_key"] = events.match_key(ev["kickoff"], ev["name_1"], ev["name_2"],
+                                               ev["player_1_id"], ev["player_2_id"])
             ladders = betano.event_ladders(ev)
+            known = bool(T and ev["player_1_id"] and ev["player_2_id"])
+            pred = None
+            if known and ladders:
+                pred = model.predict(T["ratings"], ev["player_1_id"], ev["player_2_id"], ev["surface"],
+                                     model._days(ev["kickoff"]), tour=ev["tour"], level=ev["level"])
             if not dry_run:
-                _save_event(conn, ev, fetched_at, ladders)
-            if not (ev["player_1_id"] and ev["player_2_id"]):
+                _save_event(conn, ev, fetched_at, ladders, pred)
+            if not known:
                 counts["unmatched"] += 1
-                log.info("no tour match for %s / %s", ev["name_1"], ev["name_2"])
+                log.info("no %s history for %s / %s", ev["tour"], ev["name_1"], ev["name_2"])
                 continue
             if not ladders:
                 continue
-            t = model._days(ev["kickoff"])
-            pred = model.predict(ratings, ev["player_1_id"], ev["player_2_id"], ev["surface"], t)
-            enough = advise and min(seen.get(ev["player_1_id"], 0),
-                                    seen.get(ev["player_2_id"], 0)) >= MIN_HISTORY
+            enough = (advise and ev["tour"] in VALIDATED_TOURS
+                      and min(T["seen"].get(ev["player_1_id"], 0),
+                              T["seen"].get(ev["player_2_id"], 0)) >= MIN_HISTORY)
             rows = []
             for market, rungs in ladders.items():
                 pmf = pred.pmf(market)
@@ -129,20 +146,22 @@ def run(conn, dry_run: bool, advise: bool):
     return counts
 
 
-def _save_event(conn, ev, fetched_at, ladders):
+def _save_event(conn, ev, fetched_at, ladders, pred):
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO aces.event (source, event_id, kickoff, league, name_1, name_2,
-                                    player_1_id, player_2_id, surface, url)
+                                    player_1_id, player_2_id, surface, url, tour, match_key)
             VALUES ('betano', %(event_id)s, %(kickoff)s, %(league)s, %(name_1)s, %(name_2)s,
-                    %(player_1_id)s, %(player_2_id)s, %(surface)s, %(url)s)
+                    %(player_1_id)s, %(player_2_id)s, %(surface)s, %(url)s, %(tour)s, %(match_key)s)
             ON CONFLICT (source, event_id) DO UPDATE SET kickoff=EXCLUDED.kickoff,
               player_1_id=EXCLUDED.player_1_id, player_2_id=EXCLUDED.player_2_id,
-              surface=EXCLUDED.surface, last_seen=now()""", ev)
+              surface=EXCLUDED.surface, tour=EXCLUDED.tour, match_key=EXCLUDED.match_key,
+              last_seen=now()""", ev)
         cur.executemany("""
-            INSERT INTO aces.odds (source, event_id, fetched_at, market, at_least, price)
-            VALUES ('betano', %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
-                        [(ev["event_id"], fetched_at, m, n, p)
+            INSERT INTO aces.odds (source, event_id, fetched_at, market, at_least, price, side, p_model)
+            VALUES ('betano', %s, %s, %s, %s, %s, 'over', %s) ON CONFLICT DO NOTHING""",
+                        [(ev["event_id"], fetched_at, m, n, p,
+                          model.Prediction.over(pred.pmf(m), n - 0.5) if pred else None)
                          for m, rungs in ladders.items() for n, p in rungs])
 
 

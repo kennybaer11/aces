@@ -20,11 +20,12 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-from aces import db, model
+from aces import db, events, model
 from aces.players import Players, norm
 
 EDGE = 0.10           # tails run ~1 point optimistic (tail_check), so a higher bar than 5%
 ADVISE_MARKETS = {"aces", "aces:1", "aces:2"}
+VALIDATED_TOURS = {"WTA"}   # see odds.py: other tours are priced, not advised
 SURFACES = {"tvrdý p.": "Hard", "antuka": "Clay", "tráva": "Grass", "koberec": "Hard"}
 
 
@@ -53,9 +54,9 @@ def main():
     conn = db.connect()
     fetched_at = datetime.now(timezone.utc)
 
-    events = {}
+    matches = {}
     for (mid, start, comp, name, home, away, mk, box, line, over, under) in rows:
-        ev = events.setdefault(str(mid), {
+        ev = matches.setdefault(str(mid), {
             "event_id": str(mid), "kickoff": datetime.fromisoformat(start), "league": comp,
             "name_1": home, "name_2": away, "tour": "WTA" if comp.startswith("WTA") else "ATP",
             "surface": surface_of(comp), "lines": []})
@@ -69,7 +70,7 @@ def main():
             ev["lines"].append((mk, float(line), prices))
 
     ratings, players, seen = {}, {}, {}
-    for tour in {e["tour"] for e in events.values()}:
+    for tour in {e["tour"] for e in matches.values()}:
         players[tour] = Players(conn, tour)
         hist = model.load(conn, tour)
         if len(hist):
@@ -78,32 +79,39 @@ def main():
 
     stored = priced = advised = 0
     with conn.cursor() as cur:
-        for ev in events.values():
+        for ev in matches.values():
             P = players[ev["tour"]]
             ev["player_1_id"] = P.by_full_name(ev["name_1"])
             ev["player_2_id"] = P.by_full_name(ev["name_2"])
+            ev["match_key"] = events.match_key(ev["kickoff"], ev["name_1"], ev["name_2"],
+                                               ev["player_1_id"], ev["player_2_id"])
+            r = ratings.get(ev["tour"])
+            pred = None
+            if r and ev["player_1_id"] and ev["player_2_id"]:
+                level = "Grand Slam" if any(s in ev["league"] for s in ("Australian", "Roland", "Wimbledon", "US Open")) else None
+                pred = model.predict(r, ev["player_1_id"], ev["player_2_id"], ev["surface"],
+                                     model._days(ev["kickoff"]), tour=ev["tour"], level=level)
             cur.execute("""
                 INSERT INTO aces.event (source, event_id, kickoff, league, name_1, name_2,
-                                        player_1_id, player_2_id, surface, tour)
+                                        player_1_id, player_2_id, surface, tour, match_key)
                 VALUES ('chance', %(event_id)s, %(kickoff)s, %(league)s, %(name_1)s, %(name_2)s,
-                        %(player_1_id)s, %(player_2_id)s, %(surface)s, %(tour)s)
+                        %(player_1_id)s, %(player_2_id)s, %(surface)s, %(tour)s, %(match_key)s)
                 ON CONFLICT (source, event_id) DO UPDATE SET kickoff=EXCLUDED.kickoff,
-                  player_1_id=EXCLUDED.player_1_id, player_2_id=EXCLUDED.player_2_id, last_seen=now()""", ev)
+                  player_1_id=EXCLUDED.player_1_id, player_2_id=EXCLUDED.player_2_id,
+                  tour=EXCLUDED.tour, match_key=EXCLUDED.match_key, last_seen=now()""", ev)
             for mk, line, prices in ev["lines"]:
+                p_rung = model.Prediction.over(pred.pmf(mk), line) if pred else None
                 for side, price in prices.items():
-                    cur.execute("""INSERT INTO aces.odds (source, event_id, fetched_at, market, at_least, price, side)
-                                   VALUES ('chance', %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
-                                (ev["event_id"], fetched_at, mk, math.floor(line) + 1, price, side))
+                    cur.execute("""INSERT INTO aces.odds (source, event_id, fetched_at, market, at_least,
+                                                          price, side, p_model)
+                                   VALUES ('chance', %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
+                                (ev["event_id"], fetched_at, mk, math.floor(line) + 1, price, side, p_rung))
                     stored += 1
-            r = ratings.get(ev["tour"])
-            if not (r and ev["player_1_id"] and ev["player_2_id"]) or ev["kickoff"] <= fetched_at:
+            if pred is None or ev["kickoff"] <= fetched_at:
                 continue
-            t = model._days(ev["kickoff"])
-            level = "Grand Slam" if any(s in ev["league"] for s in ("Australian", "Roland", "Wimbledon", "US Open")) else None
-            pred = model.predict(r, ev["player_1_id"], ev["player_2_id"], ev["surface"], t,
-                                 tour=ev["tour"], level=level)
             s = seen[ev["tour"]]
-            enough = min(s.get(ev["player_1_id"], 0), s.get(ev["player_2_id"], 0)) >= 10
+            enough = (ev["tour"] in VALIDATED_TOURS
+                      and min(s.get(ev["player_1_id"], 0), s.get(ev["player_2_id"], 0)) >= 10)
             for mk, line, prices in ev["lines"]:
                 pmf = pred.pmf(mk)
                 p = model.Prediction.over(pmf, line)
@@ -130,8 +138,8 @@ def main():
                 priced += 1
                 advised += bet is not None
     conn.commit()
-    unmatched = sum(1 for e in events.values() if not (e["player_1_id"] and e["player_2_id"]))
-    print(f"{len(events)} matches, {stored} prices stored, {priced} lines priced, "
+    unmatched = sum(1 for e in matches.values() if not (e["player_1_id"] and e["player_2_id"]))
+    print(f"{len(matches)} matches, {stored} prices stored, {priced} lines priced, "
           f"{advised} advised, {unmatched} matches without both players in the {'/'.join(players)} data")
 
 

@@ -54,19 +54,35 @@ def _get(path: str) -> dict:
     return r.json()["data"]
 
 
-def wta_leagues() -> list[dict]:
-    """Women's singles leagues: the WTA region, and the Slams' "(Ž)" draws."""
+SLAMS = ("Australian Open", "Roland Garros", "Wimbledon", "US Open")
+
+
+def leagues() -> list[dict]:
+    """Singles leagues of both tours: the ATP and WTA regions, and each Slam's
+    men's and women's ("(Ž)") draws. Challengers and ITF are left out - the
+    model has no history for most of their players."""
     out = []
     for group in _get("/api/sport/tenis/").get("regionGroups", []):
         for region in group.get("regions", []):
+            rname = region.get("name", "")
             for lg in region.get("leagues", []):
                 name, url = lg.get("name", ""), lg.get("url", "")
                 if "dvojice" in url or "Dvojice" in name:
                     continue
                 women = "(Ž)" in name or url.rstrip("/").split("/")[-2].endswith("-z")
-                if region.get("name") == "WTA" or (women and "itf" not in url):
-                    out.append({"name": f"{region.get('name')} - {name}", "url": url})
+                if rname == "WTA" or (rname in SLAMS and women):
+                    tour = "WTA"
+                elif rname == "ATP" or rname in SLAMS:
+                    tour = "ATP"
+                else:
+                    continue
+                out.append({"name": f"{rname} - {name}", "url": url, "tour": tour,
+                            "slam": rname in SLAMS})
     return out
+
+
+def wta_leagues() -> list[dict]:
+    return [lg for lg in leagues() if lg["tour"] == "WTA"]
 
 
 def league_events(league: dict) -> list[dict]:
@@ -83,7 +99,8 @@ def league_events(league: dict) -> list[dict]:
             if "/" in parts[0]["name"] or "/" in parts[1]["name"]:
                 continue                                   # doubles that slipped in
             out.append({"event_id": str(e["id"]), "kickoff": kickoff,
-                        "league": league["name"], "url": e["url"],
+                        "league": league["name"], "url": e["url"], "tour": league["tour"],
+                        "level": "Grand Slam" if league["slam"] else None,
                         "name_1": parts[0]["name"], "name_2": parts[1]["name"]})
     return out
 

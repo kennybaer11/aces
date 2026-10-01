@@ -149,3 +149,11 @@ BEGIN
   END IF;
 END $$;
 ALTER TABLE aces.event ADD COLUMN IF NOT EXISTS tour TEXT;   -- WTA | ATP
+
+-- For comparing bookmakers: the model's P(count >= at_least) beside every
+-- price, written when the rung is priced, and a key that is the same for one
+-- match at every bookmaker - the two tour player ids when known, otherwise the
+-- two players' name words, with the UTC date either way.
+ALTER TABLE aces.odds  ADD COLUMN IF NOT EXISTS p_model NUMERIC;
+ALTER TABLE aces.event ADD COLUMN IF NOT EXISTS match_key TEXT;
+CREATE INDEX IF NOT EXISTS event_match_key_idx ON aces.event (match_key);
