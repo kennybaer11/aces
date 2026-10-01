@@ -61,6 +61,23 @@ class Players:
             return exact.iloc[0].id
         if len(exact) > 1:
             return None
+        # A tour that writes surname and initials ("Munar J.", "Cerundolo J.
+        # M.", tennistourdata's ATP): every surname word among the bookmaker's
+        # words, and the first initial starting one of the others - so "Jaume
+        # Antoni Munar Clar" and "Munar Jaume" both find "Munar J.".
+        def abbreviated(t):
+            surname = {w for w in t if len(w) > 1}
+            initials = sorted(w for w in t if len(w) == 1)
+            if not initials or not surname or not surname <= toks:
+                return False
+            return any(w.startswith(initials[0]) for w in toks - surname)
+        abbr = self.df[self.df.tokens.map(abbreviated)]
+        if len(abbr) == 1:
+            return abbr.iloc[0].id
+        if len(abbr) > 1:
+            # Two "Zhang Z."-style namesakes: the one with the longest surname
+            # match is no better a guess than the other, so none.
+            return None
         # One name inside the other: "Leylah Annie Fernandez" for "Leylah
         # Fernandez", "Maria Camila Osorio Serrano" for "Camila Osorio".
         inside = self.df[self.df.tokens.map(lambda t: len(t) >= 2 and (t < toks or toks < t))]
