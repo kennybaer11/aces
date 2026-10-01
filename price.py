@@ -13,69 +13,17 @@ until it settles, and never after.
 
 import argparse
 import datetime as dt
-import os
 import re
 import sys
-import unicodedata
 
 import pandas as pd
-import psycopg
 from dotenv import load_dotenv
 
-from aces import model
+from aces import db, model
+from aces.players import Players
 
 EDGE = 0.05     # expected value to flag a bet
 
-DDL = """
-CREATE TABLE IF NOT EXISTS aces.line (
-  date        DATE    NOT NULL,
-  player_1_id TEXT    NOT NULL,
-  player_1    TEXT    NOT NULL,
-  player_2_id TEXT    NOT NULL,
-  player_2    TEXT    NOT NULL,
-  market      TEXT    NOT NULL,   -- aces, aces:1, aces:2, df, df:1, df:2
-  line        NUMERIC NOT NULL,
-  surface     TEXT    NOT NULL,
-  over_odds   NUMERIC,
-  under_odds  NUMERIC,
-  p_over      NUMERIC NOT NULL,   -- the model's, when the line was priced
-  model_mean  NUMERIC NOT NULL,
-  bet         TEXT,               -- over | under | NULL: no edge
-  actual      INTEGER,            -- filled by --settle
-  void        BOOLEAN,            -- retirement or walkover
-  priced_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (date, player_1_id, player_2_id, market, line)
-);
-"""
-
-
-def norm(s: str) -> str:
-    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
-    return re.sub(r"[^a-z ]", "", s.lower().replace("_", " ").replace("-", " ")).strip()
-
-
-class Players:
-    def __init__(self, conn):
-        q = """SELECT id, name, max(played_at) AS last FROM (
-                 SELECT player_a_id id, player_a name, played_at FROM aces.match
-                 UNION ALL SELECT player_b_id, player_b, played_at FROM aces.match) x
-               GROUP BY id, name"""
-        self.df = model.frame(conn, q).sort_values("last", ascending=False).drop_duplicates("id")
-        self.df["n"] = self.df["name"].map(norm)
-
-    def find(self, token: str) -> tuple[str, str]:
-        surname, _, first = token.partition(".")
-        s, f = norm(surname), norm(first)
-        hits = self.df[self.df.n.str.endswith(" " + s) | (self.df.n == s)]
-        if f:
-            hits = hits[hits.n.str.startswith(f)]
-        if hits.empty:
-            raise SystemExit(f"no player matches {token!r}")
-        if len(hits) > 1:
-            names = ", ".join(hits.name.head(5))
-            raise SystemExit(f"{token!r} is ambiguous ({names}); add an initial, e.g. {surname}.X")
-        h = hits.iloc[0]
-        return h.id, h["name"]
 
 
 def parse(path):
@@ -107,11 +55,6 @@ def parse(path):
                "over_odds": odds["O"], "under_odds": odds["U"]}
 
 
-def pmf_for(pred, market):
-    stat, _, who = market.partition(":")
-    key = "ace" if stat == "aces" else "df"
-    return getattr(pred, f"{key}_{ {'': 'total', '1': 'a', '2': 'b'}[who] }")
-
 
 def price(args, conn):
     players = Players(conn)
@@ -123,11 +66,11 @@ def price(args, conn):
     print(f"{'date':<11}{'match':<36}{'market':<8}{'line':>6}{'mean':>7}{'P(o)':>7}"
           f"{'fair O':>8}{'fair U':>8}{'odds O':>8}{'odds U':>8}{'EV':>7}  bet")
     for r in rows:
-        id1, n1 = players.find(r["p1"])
-        id2, n2 = players.find(r["p2"])
+        id1, n1 = players.by_surname(r["p1"])
+        id2, n2 = players.by_surname(r["p2"])
         t = model._days(pd.Timestamp(r["date"], tz="UTC"))
         pred = model.predict(ratings, id1, id2, r["surface"], t)
-        pmf = pmf_for(pred, r["market"])
+        pmf = pred.pmf(r["market"])
         p = model.Prediction.over(pmf, r["line"])
         mean = float((pmf * range(len(pmf))).sum())
         ev_o = p * r["over_odds"] - 1 if r["over_odds"] else None
@@ -141,17 +84,18 @@ def price(args, conn):
               f"{fmt(r['over_odds']):>8}{fmt(r['under_odds']):>8}"
               f"{(f'{best[0]:+.1%}' if best[0] is not None else '-'):>7}  {bet or ''}")
         out.append({**r, "player_1_id": id1, "player_1": n1, "player_2_id": id2,
-                    "player_2": n2, "p_over": p, "model_mean": mean, "bet": bet})
+                    "player_2": n2, "p_over": p, "model_mean": mean, "bet": bet,
+                    "source": "manual"})
     if args.dry_run:
         return
     with conn.cursor() as cur:
-        cur.execute(DDL)
         cur.executemany("""
             INSERT INTO aces.line (date, player_1_id, player_1, player_2_id, player_2, market,
-                                   line, surface, over_odds, under_odds, p_over, model_mean, bet)
+                                   line, surface, over_odds, under_odds, p_over, model_mean, bet,
+                                   source)
             VALUES (%(date)s, %(player_1_id)s, %(player_1)s, %(player_2_id)s, %(player_2)s,
                     %(market)s, %(line)s, %(surface)s, %(over_odds)s, %(under_odds)s,
-                    %(p_over)s, %(model_mean)s, %(bet)s)
+                    %(p_over)s, %(model_mean)s, %(bet)s, %(source)s)
             ON CONFLICT (date, player_1_id, player_2_id, market, line) DO UPDATE SET
               surface=EXCLUDED.surface, over_odds=EXCLUDED.over_odds,
               under_odds=EXCLUDED.under_odds, p_over=EXCLUDED.p_over,
@@ -164,24 +108,40 @@ def price(args, conn):
 
 def settle(conn):
     """Find each open line's match - the same two players within three days of
-    its date - and record the count, or void it if the match did not finish."""
+    its date - and record the count, or void it if the match did not finish.
+
+    Players are compared by tour id, so a Grand Slam match - stored under the
+    Slam's own ids - is first mapped through model.aliases.
+    """
     with conn.cursor() as cur:
-        cur.execute(DDL)
+        cur.execute("CREATE TEMP TABLE IF NOT EXISTS alias (id TEXT PRIMARY KEY, tour_id TEXT)")
+        cur.execute("TRUNCATE alias")
+        cur.executemany("INSERT INTO alias VALUES (%s, %s)", list(model.aliases(conn).items()))
         cur.execute("""
-        WITH m AS (
-          SELECT l.date, l.player_1_id, l.player_2_id, l.market, l.line, mt.completed,
-                 s1.aces a1, s2.aces a2, s1.double_faults d1, s2.double_faults d2,
+        WITH mm AS (
+          SELECT mt.*, COALESCE(xa.tour_id, mt.player_a_id) AS ca,
+                       COALESCE(xb.tour_id, mt.player_b_id) AS cb
+            FROM aces.match mt
+            LEFT JOIN alias xa ON xa.id = mt.player_a_id
+            LEFT JOIN alias xb ON xb.id = mt.player_b_id),
+        m AS (
+          SELECT l.date, l.player_1_id, l.player_2_id, l.market, l.line, mm.completed,
+                 CASE WHEN mm.ca = l.player_1_id THEN sa.aces ELSE sb.aces END AS a1,
+                 CASE WHEN mm.ca = l.player_1_id THEN sb.aces ELSE sa.aces END AS a2,
+                 CASE WHEN mm.ca = l.player_1_id THEN sa.double_faults ELSE sb.double_faults END AS d1,
+                 CASE WHEN mm.ca = l.player_1_id THEN sb.double_faults ELSE sa.double_faults END AS d2,
                  row_number() OVER (PARTITION BY l.date, l.player_1_id, l.player_2_id,
-                                    l.market, l.line ORDER BY abs(mt.played_at::date - l.date)) rn
+                                    l.market, l.line ORDER BY abs(mm.played_at::date - l.date)) rn
             FROM aces.line l
-            JOIN aces.match mt ON ((l.player_1_id, l.player_2_id) = (mt.player_a_id, mt.player_b_id)
-                                 OR (l.player_1_id, l.player_2_id) = (mt.player_b_id, mt.player_a_id))
-                              AND mt.played_at::date BETWEEN l.date - 1 AND l.date + 3
-            LEFT JOIN aces.serve s1 ON (s1.tour, s1.tournament_id, s1.year, s1.match_id, s1.set_num)
-                 = (mt.tour, mt.tournament_id, mt.year, mt.match_id, 0) AND s1.player_id = l.player_1_id
-            LEFT JOIN aces.serve s2 ON (s2.tour, s2.tournament_id, s2.year, s2.match_id, s2.set_num)
-                 = (mt.tour, mt.tournament_id, mt.year, mt.match_id, 0) AND s2.player_id = l.player_2_id
-           WHERE l.actual IS NULL AND l.void IS NOT TRUE)
+            JOIN mm ON ((l.player_1_id, l.player_2_id) = (mm.ca, mm.cb)
+                     OR (l.player_1_id, l.player_2_id) = (mm.cb, mm.ca))
+                   AND mm.played_at::date BETWEEN l.date - 1 AND l.date + 3
+            LEFT JOIN aces.serve sa ON (sa.tour, sa.tournament_id, sa.year, sa.match_id, sa.set_num, sa.side)
+                 = (mm.tour, mm.tournament_id, mm.year, mm.match_id, 0, 'a')
+            LEFT JOIN aces.serve sb ON (sb.tour, sb.tournament_id, sb.year, sb.match_id, sb.set_num, sb.side)
+                 = (mm.tour, mm.tournament_id, mm.year, mm.match_id, 0, 'b')
+           WHERE l.actual IS NULL AND l.void IS NOT TRUE
+             AND (l.kickoff IS NULL OR l.kickoff < now()))
         UPDATE aces.line l SET
           void = NOT m.completed,
           actual = CASE WHEN NOT m.completed THEN NULL
@@ -217,7 +177,7 @@ def main():
     ap.add_argument("--settle", action="store_true")
     args = ap.parse_args()
     load_dotenv()
-    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+    with db.connect() as conn:
         if args.settle:
             settle(conn)
         elif args.file:

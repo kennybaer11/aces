@@ -1,0 +1,46 @@
+name: Betano odds
+
+# Every three hours: read Betano's WTA ace and double-fault ladders, store
+# every rung, and price them with the model. Lines are frozen at kickoff, so
+# the last run before a match is its record; three hours apart, with GitHub
+# often running late, that is usually the morning of the match. Cron is UTC.
+on:
+  schedule:
+    - cron: "40 */3 * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:                  # a change to the collector proves itself at once
+      - "odds.py"
+      - "aces/betano.py"
+      - ".github/workflows/odds.yml"
+
+concurrency:
+  group: aces-odds
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  odds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # No --advise yet: the lines are a record of model against bookmaker
+      # until the backtest says the model is calibrated.
+      - name: Collect and price Betano lines
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python odds.py

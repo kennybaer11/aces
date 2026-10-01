@@ -43,6 +43,32 @@ def frame(conn, q: str) -> pd.DataFrame:
         return pd.DataFrame(cur.fetchall(), columns=[d.name for d in cur.description])
 
 
+def aliases(conn) -> dict[str, str]:
+    """Grand Slam player id -> the same player's tour id.
+
+    The Slams run their own feeds with their own player ids, so one player
+    shows up under two: Alina Charaeva is 329198 on the tour and 341216 at
+    the Slams. Left alone, her Slam matches would rate a stranger. A Slam id is
+    folded into the tour id with the same name when exactly one tour player
+    has that name; otherwise it stays as it is.
+    """
+    q = """
+    WITH p AS (
+      SELECT m.player_a_id AS id, m.player_a AS name, t.level = 'Grand Slam' AS slam
+        FROM aces.match m JOIN aces.tournament t USING (tour, tournament_id, year)
+      UNION ALL
+      SELECT m.player_b_id, m.player_b, t.level = 'Grand Slam'
+        FROM aces.match m JOIN aces.tournament t USING (tour, tournament_id, year)),
+    ids AS (SELECT id, name, bool_and(slam) AS slam_only FROM p GROUP BY id, name),
+    tour AS (SELECT name, min(id) AS id FROM ids WHERE NOT slam_only
+              GROUP BY name HAVING count(*) = 1)
+    SELECT s.id, t.id FROM ids s JOIN tour t USING (name) WHERE s.slam_only AND s.id <> t.id
+    """
+    with conn.cursor() as cur:
+        cur.execute(q)
+        return dict(cur.fetchall())
+
+
 def load(conn) -> pd.DataFrame:
     """One row per player per completed match, oldest first."""
     q = """
@@ -64,6 +90,9 @@ def load(conn) -> pd.DataFrame:
      WHERE m.completed AND sa.serve_points > 0 AND sb.serve_points > 0
     """
     df = frame(conn, q)
+    alias = aliases(conn)
+    for col in ("player_a_id", "player_b_id"):
+        df[col] = df[col].map(lambda i: alias.get(i, i))
     df["played_at"] = pd.to_datetime(df["played_at"], utc=True)
     df["surface"] = df["surface"].fillna("Hard").replace({"Carpet": "Hard"})
     return df.sort_values(["played_at", "tournament_id", "match_id"]).reset_index(drop=True)
@@ -189,6 +218,12 @@ class Prediction:
     @staticmethod
     def over(pmf: np.ndarray, line: float) -> float:
         return float(pmf[int(math.floor(line)) + 1:].sum())
+
+    def pmf(self, market: str) -> np.ndarray:
+        """The count distribution for a market code: aces, aces:1, df:2, ..."""
+        stat, _, who = market.partition(":")
+        key = "ace" if stat == "aces" else "df"
+        return getattr(self, f"{key}_{ {'': 'total', '1': 'a', '2': 'b'}[who] }")
 
     def mean(self, key: str) -> float:
         pmf = getattr(self, key)

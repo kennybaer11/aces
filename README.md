@@ -56,3 +56,26 @@ Copy `lines.example.txt` to `lines.txt` and paste in the Chance.cz lines.
 python price.py lines.txt               # model probability, fair odds, EV; stores the lines
 python price.py --settle                # after collect.py: results and running profit
 ```
+
+## Betano odds
+
+Chance.cz has no ace or double-fault lines on WTA matches before they start.
+Betano does: a ladder of "N or more" rungs for total aces, each player's
+aces, and the same for double faults. `odds.py` reads them from Betano's own
+JSON (`aces/betano.py`), stores every rung in `aces.odds`, and writes one
+priced line per match and market to `aces.line`, which betken.cz's Tennis page
+shows. A match's line freezes at kickoff.
+
+```bash
+python odds.py --dry-run    # print what it would store
+python odds.py              # store and price - no advice
+python odds.py --advise     # also mark bets that clear the edge
+```
+
+`.github/workflows/odds.yml` runs it every three hours, without `--advise`
+until the backtest shows the model is calibrated. If Betano ever answers with
+a challenge page, the run stops and says so rather than trying to get past it.
+
+Players are matched to tour ids by name (`aces/players.py`). Grand Slams use
+their own player ids, so `model.aliases` folds each Slam id into the tour id
+with the same name.

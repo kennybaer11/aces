@@ -76,3 +76,61 @@ CREATE TABLE IF NOT EXISTS aces.serve (
 );
 
 CREATE INDEX IF NOT EXISTS serve_player_idx ON aces.serve (player_id);
+
+-- A bookmaker line and what the model made of it when it was priced. Written
+-- by price.py (lines typed in by hand) and odds.py (collected from a bookmaker),
+-- settled by price.py --settle. Never repriced once its match has started or
+-- settled: this is the record, not a backtest.
+CREATE TABLE IF NOT EXISTS aces.line (
+  date        DATE    NOT NULL,
+  player_1_id TEXT    NOT NULL,
+  player_1    TEXT    NOT NULL,
+  player_2_id TEXT    NOT NULL,
+  player_2    TEXT    NOT NULL,
+  market      TEXT    NOT NULL,   -- aces, aces:1, aces:2, df, df:1, df:2
+  line        NUMERIC NOT NULL,   -- "10+" is stored as 9.5
+  surface     TEXT    NOT NULL,
+  over_odds   NUMERIC,
+  under_odds  NUMERIC,
+  p_over      NUMERIC NOT NULL,   -- the model's, when the line was priced
+  model_mean  NUMERIC NOT NULL,
+  bet         TEXT,               -- over | under | NULL: no edge
+  actual      INTEGER,            -- filled by --settle
+  void        BOOLEAN,            -- retirement or walkover
+  priced_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (date, player_1_id, player_2_id, market, line)
+);
+ALTER TABLE aces.line ADD COLUMN IF NOT EXISTS source   TEXT;         -- manual | betano
+ALTER TABLE aces.line ADD COLUMN IF NOT EXISTS event_id TEXT;         -- the bookmaker's
+ALTER TABLE aces.line ADD COLUMN IF NOT EXISTS kickoff  TIMESTAMPTZ;  -- frozen from then on
+
+-- A bookmaker's match, as it listed it, with the players resolved to tour ids.
+CREATE TABLE IF NOT EXISTS aces.event (
+  source      TEXT    NOT NULL,   -- betano
+  event_id    TEXT    NOT NULL,
+  kickoff     TIMESTAMPTZ NOT NULL,
+  league      TEXT,
+  name_1      TEXT    NOT NULL,   -- as the bookmaker spells them
+  name_2      TEXT    NOT NULL,
+  player_1_id TEXT,               -- NULL when no tour player matched
+  player_2_id TEXT,
+  surface     TEXT,
+  url         TEXT,
+  first_seen  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (source, event_id)
+);
+
+-- Every price seen, every time it was collected: the ladder of "N or more"
+-- rungs per market. Kept whole so the model can later be scored against the
+-- bookmaker on every rung, not only the ones it advised.
+CREATE TABLE IF NOT EXISTS aces.odds (
+  source      TEXT    NOT NULL,
+  event_id    TEXT    NOT NULL,
+  fetched_at  TIMESTAMPTZ NOT NULL,
+  market      TEXT    NOT NULL,   -- aces, aces:1, aces:2, df, df:1, df:2
+  at_least    INTEGER NOT NULL,   -- the rung: "10+" is 10
+  price       NUMERIC NOT NULL,
+  PRIMARY KEY (source, event_id, fetched_at, market, at_least),
+  FOREIGN KEY (source, event_id) REFERENCES aces.event (source, event_id) ON DELETE CASCADE
+);
