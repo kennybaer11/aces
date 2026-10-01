@@ -1,0 +1,9 @@
+# Ranges, not exact pins: Python 3.14 needs recent wheels.
+requests>=2.32.3,<3
+psycopg[binary]>=3.2.0
+python-dotenv>=1.0.1,<2
+
+# The model.
+numpy>=2.1
+pandas>=2.2.0
+scipy>=1.14

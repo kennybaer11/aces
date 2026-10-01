@@ -1,0 +1,17 @@
+# Chance.cz ace and double-fault lines.
+#
+#   date  player  player  market  line  O<over>  U<under>
+#
+# Players by surname; use _ for a space (Haddad_Maia) and add the first
+# initial when two share a name (Pliskova.Ka). The market is one of
+#   aces     total aces in the match
+#   aces:1   aces by the first player named, aces:2 by the second
+#   df, df:1, df:2   the same for double faults
+# TAG THE PRICES with O and U, as in posession's odds.txt; a missing side is -.
+#
+# A "surface" line sets the surface for every row below it.
+#
+# surface Hard
+# 2026-10-02  Swiatek  Gauff   aces     7.5   O1.85  U1.85
+# 2026-10-02  Swiatek  Gauff   aces:2   3.5   O1.90  U1.80
+# 2026-10-02  Swiatek  Gauff   df       6.5   O1.75  U1.95
