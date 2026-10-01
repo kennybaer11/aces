@@ -72,7 +72,8 @@ python odds.py              # store and price - no advice
 python odds.py --advise     # also mark bets that clear the edge
 ```
 
-`.github/workflows/odds.yml` runs it every three hours, without `--advise`
+The posession server runs it every three hours (`deploy/run_aces.sh` in the
+posession repo) - Betano refuses GitHub Actions runners - without `--advise`
 until the backtest shows the model is calibrated. If Betano ever answers with
 a challenge page, the run stops and says so rather than trying to get past it.
 
