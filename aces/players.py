@@ -17,13 +17,14 @@ def norm(s: str) -> str:
 
 
 class Players:
-    def __init__(self, conn):
+    def __init__(self, conn, tour: str = "WTA"):
         q = """SELECT id, name, max(played_at) AS last FROM (
-                 SELECT player_a_id id, player_a name, played_at FROM aces.match
-                 UNION ALL SELECT player_b_id, player_b, played_at FROM aces.match) x
+                 SELECT player_a_id id, player_a name, played_at FROM aces.match WHERE tour = %(t)s
+                 UNION ALL
+                 SELECT player_b_id, player_b, played_at FROM aces.match WHERE tour = %(t)s) x
                GROUP BY id, name"""
-        df = model.frame(conn, q)
-        alias = model.aliases(conn)
+        df = model.frame(conn, q, {"t": tour})
+        alias = model.aliases(conn, tour)
         df["id"] = df["id"].map(lambda i: alias.get(i, i))
         self.df = df.sort_values("last", ascending=False).drop_duplicates("id")
         self.df["n"] = self.df["name"].map(norm)

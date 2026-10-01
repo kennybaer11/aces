@@ -39,14 +39,14 @@ SHAPE = {"ace": 6.0, "df": 12.0}
 KMAX = 60
 
 
-def frame(conn, q: str) -> pd.DataFrame:
+def frame(conn, q: str, params=None) -> pd.DataFrame:
     """A query's rows as a DataFrame, without pandas' SQLAlchemy warning."""
     with conn.cursor() as cur:
-        cur.execute(q)
+        cur.execute(q, params)
         return pd.DataFrame(cur.fetchall(), columns=[d.name for d in cur.description])
 
 
-def aliases(conn) -> dict[str, str]:
+def aliases(conn, tour: str = "WTA") -> dict[str, str]:
     """Grand Slam player id -> the same player's tour id.
 
     The Slams run their own feeds with their own player ids, so one player
@@ -59,21 +59,23 @@ def aliases(conn) -> dict[str, str]:
     WITH p AS (
       SELECT m.player_a_id AS id, m.player_a AS name, t.level = 'Grand Slam' AS slam
         FROM aces.match m JOIN aces.tournament t USING (tour, tournament_id, year)
+       WHERE m.tour = %(tour)s
       UNION ALL
       SELECT m.player_b_id, m.player_b, t.level = 'Grand Slam'
-        FROM aces.match m JOIN aces.tournament t USING (tour, tournament_id, year)),
+        FROM aces.match m JOIN aces.tournament t USING (tour, tournament_id, year)
+       WHERE m.tour = %(tour)s),
     ids AS (SELECT id, name, bool_and(slam) AS slam_only FROM p GROUP BY id, name),
     tour AS (SELECT name, min(id) AS id FROM ids WHERE NOT slam_only
               GROUP BY name HAVING count(*) = 1)
     SELECT s.id, t.id FROM ids s JOIN tour t USING (name) WHERE s.slam_only AND s.id <> t.id
     """
     with conn.cursor() as cur:
-        cur.execute(q)
+        cur.execute(q, {"tour": tour})
         return dict(cur.fetchall())
 
 
-def load(conn) -> pd.DataFrame:
-    """One row per player per completed match, oldest first."""
+def load(conn, tour: str = "WTA") -> pd.DataFrame:
+    """One row per player per completed match of one tour, oldest first."""
     q = """
     SELECT m.tour, m.tournament_id, m.year, m.match_id, m.draw, m.round,
            t.name AS tournament, t.level, t.surface, t.indoor,
@@ -91,9 +93,10 @@ def load(conn) -> pd.DataFrame:
       JOIN aces.serve sb ON (sb.tour, sb.tournament_id, sb.year, sb.match_id, sb.set_num, sb.side)
                           = (m.tour, m.tournament_id, m.year, m.match_id, 0, 'b')
      WHERE m.completed AND sa.serve_points > 0 AND sb.serve_points > 0
+       AND m.tour = %s
     """
-    df = frame(conn, q)
-    alias = aliases(conn)
+    df = frame(conn, q, (tour,))
+    alias = aliases(conn, tour)
     for col in ("player_a_id", "player_b_id"):
         df[col] = df[col].map(lambda i: alias.get(i, i))
     df["played_at"] = pd.to_datetime(df["played_at"], utc=True)

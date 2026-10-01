@@ -8,3 +8,4 @@ cache/
 lines.txt
 backtest*.csv
 bt_*.csv
+tail_check.*
