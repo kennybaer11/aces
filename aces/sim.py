@@ -27,7 +27,13 @@ GRID = np.round(np.arange(0.36, 0.801, 0.02), 2)   # serve-point win probability
 # 2025-26, which the backtest never saw it fitted on.
 LENGTH = 0.888
 SIMS = 3000
-CACHE = Path(__file__).resolve().parent.parent / "cache" / f"servepoints_{SIMS}.npz"
+CACHE = Path(__file__).resolve().parent.parent / "cache"
+
+
+def _cache(best_of: int) -> Path:
+    # Best of three keeps its original name, so an existing grid is reused.
+    suffix = "" if best_of == 3 else f"_bo{best_of}"
+    return CACHE / f"servepoints_{SIMS}{suffix}.npz"
 
 
 def _game(p, rng):
@@ -44,12 +50,13 @@ def _game(p, rng):
             return False, s + r
 
 
-def _match(pa, pb, rng):
+def _match(pa, pb, rng, best_of=3):
     """One match; returns (points A served, points B served, sets)."""
+    need = best_of // 2 + 1
     na = nb = 0
     sets_a = sets_b = 0
     a_serves = rng.random() < 0.5
-    while sets_a < 2 and sets_b < 2:
+    while sets_a < need and sets_b < need:
         ga = gb = 0
         while True:
             if ga == 6 and gb == 6:
@@ -92,7 +99,7 @@ def _match(pa, pb, rng):
     return na, nb, sets_a + sets_b
 
 
-def _build():
+def _build(best_of: int):
     rng = np.random.default_rng(7)
     k = len(GRID)
     out = np.zeros((k, k, SIMS, 3), dtype=np.int16)
@@ -102,25 +109,26 @@ def _build():
                 out[i, j] = out[j, i][:, [1, 0, 2]]
                 continue
             for s in range(SIMS):
-                out[i, j, s] = _match(pa, pb, rng)
-    CACHE.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(CACHE, grid=GRID, sims=out)
+                out[i, j, s] = _match(pa, pb, rng, best_of)
+    CACHE.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(_cache(best_of), grid=GRID, sims=out)
     return out
 
 
-_SIMS = None
+_SIMS = {}
 
 
-def serve_points(pa: float, pb: float) -> np.ndarray:
+def serve_points(pa: float, pb: float, best_of: int = 3, length: float = None) -> np.ndarray:
     """SIMS x 3 array of (A's serve points, B's serve points, sets played).
 
-    Serve points are scaled by LENGTH, so they are floats, not counts.
+    Serve points are scaled by `length` (LENGTH, the WTA figure, unless a
+    tour passes its own), so they are floats, not counts.
     """
-    global _SIMS
-    if _SIMS is None:
-        _SIMS = np.load(CACHE)["sims"] if CACHE.exists() else _build()
+    if best_of not in _SIMS:
+        f = _cache(best_of)
+        _SIMS[best_of] = np.load(f)["sims"] if f.exists() else _build(best_of)
     i = int(np.abs(GRID - np.clip(pa, GRID[0], GRID[-1])).argmin())
     j = int(np.abs(GRID - np.clip(pb, GRID[0], GRID[-1])).argmin())
-    out = _SIMS[i, j].astype(float)
-    out[:, :2] *= LENGTH
+    out = _SIMS[best_of][i, j].astype(float)
+    out[:, :2] *= LENGTH if length is None else length
     return out

@@ -1,0 +1,139 @@
+#!/usr/bin/env python
+"""Store Chance.cz ace and double-fault lines collected by chance_collect.js,
+and price the ones the model can.
+
+    python load_chance.py cache/chance/2026-10-01.json
+    python load_chance.py cache/chance/2026-10-01.json --advise
+
+Chance.cz quotes both sides of one line per market - "under 10.5" and "over
+10.5" - so each line is stored as an over and an under rung in aces.odds and
+priced as one aces.line row on the side with more value. Its ace lines are on
+ATP matches; they are priced once the ATP history is loaded, and until then
+only stored. Like odds.py, nothing is advised without --advise, and only aces.
+"""
+
+import argparse
+import json
+import math
+import sys
+from datetime import datetime, timezone
+
+from dotenv import load_dotenv
+
+from aces import db, model
+from aces.players import Players, norm
+
+EDGE = 0.10           # tails run ~1 point optimistic (tail_check), so a higher bar than 5%
+ADVISE_MARKETS = {"aces", "aces:1", "aces:2"}
+SURFACES = {"tvrdý p.": "Hard", "antuka": "Clay", "tráva": "Grass", "koberec": "Hard"}
+
+
+def surface_of(comp: str) -> str:
+    for k, v in SURFACES.items():
+        if k in comp:
+            return v
+    return "Hard"
+
+
+def which_player(box: str, home: str, away: str) -> str | None:
+    """'A.Molčan' or 'Yunchaokete Bu' -> '1' or '2', by shared name words."""
+    b = set(norm(box.replace(".", " ")).split())
+    h, a = set(norm(home).split()), set(norm(away).split())
+    sh, sa = len(b & h), len(b & a)
+    return "1" if sh > sa else "2" if sa > sh else None
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("file")
+    ap.add_argument("--advise", action="store_true")
+    args = ap.parse_args()
+    load_dotenv()
+    rows = json.load(open(args.file, encoding="utf-8"))
+    conn = db.connect()
+    fetched_at = datetime.now(timezone.utc)
+
+    events = {}
+    for (mid, start, comp, name, home, away, mk, box, line, over, under) in rows:
+        ev = events.setdefault(str(mid), {
+            "event_id": str(mid), "kickoff": datetime.fromisoformat(start), "league": comp,
+            "name_1": home, "name_2": away, "tour": "WTA" if comp.startswith("WTA") else "ATP",
+            "surface": surface_of(comp), "lines": []})
+        if mk.endswith(":p"):
+            who = which_player(box, home, away)
+            if not who:
+                continue
+            mk = mk[:-1] + who
+        prices = {s: p for s, p in (("over", over), ("under", under)) if p and p > 1.01}
+        if prices:
+            ev["lines"].append((mk, float(line), prices))
+
+    ratings, players, seen = {}, {}, {}
+    for tour in {e["tour"] for e in events.values()}:
+        players[tour] = Players(conn, tour)
+        hist = model.load(conn, tour)
+        if len(hist):
+            ratings[tour] = model.walk(hist)
+            seen[tour] = hist.player_a_id.value_counts().add(hist.player_b_id.value_counts(), fill_value=0)
+
+    stored = priced = advised = 0
+    with conn.cursor() as cur:
+        for ev in events.values():
+            P = players[ev["tour"]]
+            ev["player_1_id"] = P.by_full_name(ev["name_1"])
+            ev["player_2_id"] = P.by_full_name(ev["name_2"])
+            cur.execute("""
+                INSERT INTO aces.event (source, event_id, kickoff, league, name_1, name_2,
+                                        player_1_id, player_2_id, surface, tour)
+                VALUES ('chance', %(event_id)s, %(kickoff)s, %(league)s, %(name_1)s, %(name_2)s,
+                        %(player_1_id)s, %(player_2_id)s, %(surface)s, %(tour)s)
+                ON CONFLICT (source, event_id) DO UPDATE SET kickoff=EXCLUDED.kickoff,
+                  player_1_id=EXCLUDED.player_1_id, player_2_id=EXCLUDED.player_2_id, last_seen=now()""", ev)
+            for mk, line, prices in ev["lines"]:
+                for side, price in prices.items():
+                    cur.execute("""INSERT INTO aces.odds (source, event_id, fetched_at, market, at_least, price, side)
+                                   VALUES ('chance', %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
+                                (ev["event_id"], fetched_at, mk, math.floor(line) + 1, price, side))
+                    stored += 1
+            r = ratings.get(ev["tour"])
+            if not (r and ev["player_1_id"] and ev["player_2_id"]) or ev["kickoff"] <= fetched_at:
+                continue
+            t = model._days(ev["kickoff"])
+            level = "Grand Slam" if any(s in ev["league"] for s in ("Australian", "Roland", "Wimbledon", "US Open")) else None
+            pred = model.predict(r, ev["player_1_id"], ev["player_2_id"], ev["surface"], t,
+                                 tour=ev["tour"], level=level)
+            s = seen[ev["tour"]]
+            enough = min(s.get(ev["player_1_id"], 0), s.get(ev["player_2_id"], 0)) >= 10
+            for mk, line, prices in ev["lines"]:
+                pmf = pred.pmf(mk)
+                p = model.Prediction.over(pmf, line)
+                ev_over = p * prices["over"] - 1 if "over" in prices else None
+                ev_under = (1 - p) * prices["under"] - 1 if "under" in prices else None
+                best = max([(e, sd) for e, sd in ((ev_over, "over"), (ev_under, "under")) if e is not None])
+                bet = best[1] if (args.advise and enough and mk in ADVISE_MARKETS and best[0] >= EDGE) else None
+                cur.execute("""
+                    DELETE FROM aces.line WHERE source = 'chance' AND event_id = %s AND market = %s
+                       AND line <> %s AND kickoff > now() AND actual IS NULL""", (ev["event_id"], mk, line))
+                cur.execute("""
+                    INSERT INTO aces.line (date, player_1_id, player_1, player_2_id, player_2, market, line,
+                                           surface, over_odds, under_odds, p_over, model_mean, bet,
+                                           source, event_id, kickoff)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'chance', %s, %s)
+                    ON CONFLICT (date, player_1_id, player_2_id, market, line) DO UPDATE SET
+                      over_odds=EXCLUDED.over_odds, under_odds=EXCLUDED.under_odds, p_over=EXCLUDED.p_over,
+                      model_mean=EXCLUDED.model_mean, bet=EXCLUDED.bet, priced_at=now()
+                    WHERE aces.line.actual IS NULL AND aces.line.void IS NOT TRUE
+                      AND (aces.line.kickoff IS NULL OR aces.line.kickoff > now())""",
+                            (ev["kickoff"].date(), ev["player_1_id"], ev["name_1"], ev["player_2_id"], ev["name_2"],
+                             mk, line, ev["surface"], prices.get("over"), prices.get("under"), p,
+                             float((pmf * range(len(pmf))).sum()), bet, ev["event_id"], ev["kickoff"]))
+                priced += 1
+                advised += bet is not None
+    conn.commit()
+    unmatched = sum(1 for e in events.values() if not (e["player_1_id"] and e["player_2_id"]))
+    print(f"{len(events)} matches, {stored} prices stored, {priced} lines priced, "
+          f"{advised} advised, {unmatched} matches without both players in the {'/'.join(players)} data")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

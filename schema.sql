@@ -134,3 +134,18 @@ CREATE TABLE IF NOT EXISTS aces.odds (
   PRIMARY KEY (source, event_id, fetched_at, market, at_least),
   FOREIGN KEY (source, event_id) REFERENCES aces.event (source, event_id) ON DELETE CASCADE
 );
+
+-- Two-sided bookmakers (Chance.cz) quote an under as well as an over; Betano
+-- quotes overs only. A rung of "at least N" is the over side of the line
+-- N - 0.5, so one table holds both, told apart by side.
+ALTER TABLE aces.odds ADD COLUMN IF NOT EXISTS side TEXT NOT NULL DEFAULT 'over';  -- over | under
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint c JOIN pg_attribute a
+                   ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
+                  WHERE c.conrelid = 'aces.odds'::regclass AND c.contype = 'p' AND a.attname = 'side') THEN
+    ALTER TABLE aces.odds DROP CONSTRAINT odds_pkey;
+    ALTER TABLE aces.odds ADD PRIMARY KEY (source, event_id, fetched_at, market, at_least, side);
+  END IF;
+END $$;
+ALTER TABLE aces.event ADD COLUMN IF NOT EXISTS tour TEXT;   -- WTA | ATP

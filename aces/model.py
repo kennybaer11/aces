@@ -236,12 +236,23 @@ class Prediction:
         return float((np.arange(len(pmf)) * pmf).sum())
 
 
+# Serve points actually played over what the simulation gives, per tour. The
+# WTA figure is fitted on 2024 (see sim.py); the ATP one on 2023, the first
+# season collected, so 2024-26 stay out of sample for it.
+LENGTH = {"WTA": sim.LENGTH, "ATP": sim.LENGTH}
+
+
+def best_of(tour: str, level: str | None) -> int:
+    """Men play best of five at the Grand Slams; everything else is three."""
+    return 5 if tour == "ATP" and level == "Grand Slam" else 3
+
+
 def predict(r: Ratings, a: str, b: str, surface: str, t: float,
-            shape: dict | None = None) -> Prediction:
+            shape: dict | None = None, tour: str = "WTA", level: str | None = None) -> Prediction:
     shape = shape or SHAPE
     pa = r.rate("spw", a, b, surface, t)
     pb = r.rate("spw", b, a, surface, t)
-    pts = sim.serve_points(pa, pb).astype(float)
+    pts = sim.serve_points(pa, pb, best_of(tour, level), LENGTH[tour])
     out = {}
     rates = {}
     for stat in ("ace", "df"):

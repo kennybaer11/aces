@@ -27,7 +27,7 @@ from aces.players import Players
 
 log = logging.getLogger("odds")
 
-EDGE = 0.05          # expected value to advise a bet
+EDGE = 0.10          # expected value to advise a bet; tails run ~1 point optimistic (tail_check)
 # Only aces are advised. Walk-forward on 2025-26 the model beats each player's
 # own recent average on aces (log-loss 1.82 v 1.99) but only ties it on double
 # faults, so a DF "edge" is not one. DF lines are still priced and stored.

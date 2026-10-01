@@ -77,6 +77,7 @@ def median_line(pmf):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--start", default="2024-01-01")
+    ap.add_argument("--tour", default="WTA", choices=("WTA", "ATP"))
     ap.add_argument("--shape-ace", type=float, default=model.SHAPE["ace"])
     ap.add_argument("--shape-df", type=float, default=model.SHAPE["df"])
     ap.add_argument("--out", default=None, help="write per-prediction rows to this CSV")
@@ -86,7 +87,7 @@ def main():
     load_dotenv()
 
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
-        df = model.load(conn)
+        df = model.load(conn, args.tour)
     start = pd.Timestamp(args.start, tz="UTC")
     print(f"{len(df)} completed matches with stats, {(df.played_at >= start).sum()} from {args.start}")
 
@@ -137,7 +138,7 @@ def main():
         t = model._days(row["played_at"])
         if row["played_at"] >= start and (args.every == 1 or zlib.crc32((row["match_id"] + row["tournament_id"]).encode()) % args.every == 0):
             score(row, model.predict(r, row["player_a_id"], row["player_b_id"],
-                                     row["surface"], t, shape), r)
+                                     row["surface"], t, shape, args.tour, row["level"]), r)
         r.update(row, t)
         learn_baseline(row)
 
