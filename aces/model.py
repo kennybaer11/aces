@@ -242,6 +242,21 @@ class Prediction:
 LENGTH = {"WTA": sim.LENGTH, "ATP": sim.LENGTH}
 
 
+def kelly_growth(p: float, odds: float) -> float:
+    """Expected log growth of a bankroll staking the Kelly fraction on a bet
+    won with probability p at decimal odds - 0 when there is no edge.
+
+    Choosing between rungs of one ladder by this rather than by EV weighs the
+    edge against the chance of collecting it: a 4.60 shot at +26% grows a
+    bankroll more slowly than a 2.92 at +15%, and the long shot sits where the
+    model's tail is least reliable."""
+    b = odds - 1
+    f = (p * odds - 1) / b if b > 0 else 0
+    if f <= 0:
+        return 0.0
+    return p * math.log(1 + f * b) + (1 - p) * math.log(1 - f)
+
+
 def best_of(tour: str, level: str | None) -> int:
     """Men play best of five at the Grand Slams; everything else is three."""
     return 5 if tour == "ATP" and level == "Grand Slam" else 3

@@ -62,14 +62,24 @@ def surface_for(conn, ev: dict) -> str:
     return "Hard"
 
 
+MIN_P = 0.30         # never advise a rung the model gives less than this
+
+
 def best_line(pmf, rungs: list[tuple[int, float]], can_advise: bool):
-    """(at_least, price, p, ev, advised) for the rung this market is shown at."""
+    """(at_least, price, p, ev, advised) for the rung this market is shown at.
+
+    Advised: of the rungs the model gives at least MIN_P and at least EDGE of
+    value, the one with the best Kelly growth (model.kelly_growth) - not the
+    one with the most EV, which on Betano's ladders is nearly always the top
+    rung, the long shot where the model's tail is least reliable. Unadvised:
+    the rung nearest even money."""
     priced = []
     for n, price in rungs:
         p = model.Prediction.over(pmf, n - 0.5)
         priced.append((n, price, p, p * price - 1))
-    top = max(priced, key=lambda r: r[3])
-    if can_advise and top[3] >= EDGE:
+    ok = [r for r in priced if r[2] >= MIN_P and r[3] >= EDGE]
+    if can_advise and ok:
+        top = max(ok, key=lambda r: model.kelly_growth(r[2], r[1]))
         return (*top, True)
     even = min(priced, key=lambda r: abs(r[1] - 2.0))
     return (*even, False)

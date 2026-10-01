@@ -24,6 +24,7 @@ from aces import db, events, model
 from aces.players import Players, norm
 
 EDGE = 0.10           # tails run ~1 point optimistic (tail_check), so a higher bar than 5%
+MIN_P = 0.30          # never advise a side the model gives less than this
 ADVISE_MARKETS = {"aces", "aces:1", "aces:2"}
 VALIDATED_TOURS = {"WTA"}   # see odds.py: other tours are priced, not advised
 SURFACES = {"tvrdý p.": "Hard", "antuka": "Clay", "tráva": "Grass", "koberec": "Hard"}
@@ -117,8 +118,13 @@ def main():
                 p = model.Prediction.over(pmf, line)
                 ev_over = p * prices["over"] - 1 if "over" in prices else None
                 ev_under = (1 - p) * prices["under"] - 1 if "under" in prices else None
-                best = max([(e, sd) for e, sd in ((ev_over, "over"), (ev_under, "under")) if e is not None])
-                bet = best[1] if (args.advise and enough and mk in ADVISE_MARKETS and best[0] >= EDGE) else None
+                # Same rule as odds.py: the side with the best Kelly growth among
+                # those with EDGE of value and a model chance of at least MIN_P.
+                sides = [(model.kelly_growth(pr, prices[sd]), sd) for sd, pr, e in
+                         (("over", p, ev_over), ("under", 1 - p, ev_under))
+                         if e is not None and e >= EDGE and pr >= MIN_P]
+                bet = (max(sides)[1] if sides and args.advise and enough and mk in ADVISE_MARKETS
+                       else None)
                 cur.execute("""
                     DELETE FROM aces.line WHERE source = 'chance' AND event_id = %s AND market = %s
                        AND line <> %s AND kickoff > now() AND actual IS NULL""", (ev["event_id"], mk, line))
