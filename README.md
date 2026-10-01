@@ -73,8 +73,10 @@ python odds.py --advise     # also mark bets that clear the edge
 ```
 
 The posession server runs it every three hours (`deploy/run_aces.sh` in the
-posession repo) - Betano refuses GitHub Actions runners - without `--advise`
-until the backtest shows the model is calibrated. If Betano ever answers with
+posession repo) - Betano refuses GitHub Actions runners - with `--advise`
+since 1 Oct 2026: WTA aces only, at +10% EV or more, both players with at least
+ten matches of history. ATP is priced but not advised until its own backtest
+passes. If Betano ever answers with
 a challenge page, the run stops and says so rather than trying to get past it.
 
 Players are matched to tour ids by name (`aces/players.py`). Grand Slams use
