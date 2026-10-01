@@ -17,6 +17,7 @@ average, as a negative binomial, ignoring the opponent and match length.
 
 import argparse
 import math
+import zlib
 import os
 from collections import defaultdict
 
@@ -79,6 +80,8 @@ def main():
     ap.add_argument("--shape-ace", type=float, default=model.SHAPE["ace"])
     ap.add_argument("--shape-df", type=float, default=model.SHAPE["df"])
     ap.add_argument("--out", default=None, help="write per-prediction rows to this CSV")
+    ap.add_argument("--every", type=int, default=1,
+                    help="score every Nth match only - faster, for tuning")
     args = ap.parse_args()
     load_dotenv()
 
@@ -132,7 +135,7 @@ def main():
     for row in df.itertuples(index=False):
         row = row._asdict()
         t = model._days(row["played_at"])
-        if row["played_at"] >= start:
+        if row["played_at"] >= start and (args.every == 1 or zlib.crc32((row["match_id"] + row["tournament_id"]).encode()) % args.every == 0):
             score(row, model.predict(r, row["player_a_id"], row["player_b_id"],
                                      row["surface"], t, shape), r)
         r.update(row, t)

@@ -28,6 +28,10 @@ from aces.players import Players
 log = logging.getLogger("odds")
 
 EDGE = 0.05          # expected value to advise a bet
+# Only aces are advised. Walk-forward on 2025-26 the model beats each player's
+# own recent average on aces (log-loss 1.82 v 1.99) but only ties it on double
+# faults, so a DF "edge" is not one. DF lines are still priced and stored.
+ADVISE_MARKETS = {"aces", "aces:1", "aces:2"}
 MIN_HISTORY = 10     # matches of serve stats each player needs before we advise
 SLAM_SURFACE = {"Australian Open": "Hard", "Roland Garros": "Clay",
                 "Wimbledon": "Grass", "US Open": "Hard"}
@@ -102,7 +106,8 @@ def run(conn, dry_run: bool, advise: bool):
             rows = []
             for market, rungs in ladders.items():
                 pmf = pred.pmf(market)
-                n, price, p, gain, advised = best_line(pmf, rungs, enough)
+                n, price, p, gain, advised = best_line(pmf, rungs,
+                                                       enough and market in ADVISE_MARKETS)
                 rows.append({
                     "date": ev["kickoff"].date(), "player_1_id": ev["player_1_id"],
                     "player_1": ev["name_1"], "player_2_id": ev["player_2_id"],

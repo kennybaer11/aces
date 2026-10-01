@@ -18,6 +18,14 @@ from pathlib import Path
 import numpy as np
 
 GRID = np.round(np.arange(0.36, 0.801, 0.02), 2)   # serve-point win probability
+
+# Real WTA matches are shorter than independent points make them: on 2024's
+# 3,969 matches the simulation gave 80.3 serve points a player against 71.3
+# played (2026: 79.9 against 70.6). Wider day-to-day form alone cannot close
+# that without making lengths more variable than they are, so the shortfall is
+# taken as it is measured - a flat factor, fitted on 2024 and checked on
+# 2025-26, which the backtest never saw it fitted on.
+LENGTH = 0.888
 SIMS = 3000
 CACHE = Path(__file__).resolve().parent.parent / "cache" / f"servepoints_{SIMS}.npz"
 
@@ -104,10 +112,15 @@ _SIMS = None
 
 
 def serve_points(pa: float, pb: float) -> np.ndarray:
-    """SIMS x 3 array of (A's serve points, B's serve points, sets played)."""
+    """SIMS x 3 array of (A's serve points, B's serve points, sets played).
+
+    Serve points are scaled by LENGTH, so they are floats, not counts.
+    """
     global _SIMS
     if _SIMS is None:
         _SIMS = np.load(CACHE)["sims"] if CACHE.exists() else _build()
     i = int(np.abs(GRID - np.clip(pa, GRID[0], GRID[-1])).argmin())
     j = int(np.abs(GRID - np.clip(pb, GRID[0], GRID[-1])).argmin())
-    return _SIMS[i, j]
+    out = _SIMS[i, j].astype(float)
+    out[:, :2] *= LENGTH
+    return out

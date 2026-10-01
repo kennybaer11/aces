@@ -6,3 +6,5 @@ venv/
 cache/
 *.log
 lines.txt
+backtest*.csv
+bt_*.csv

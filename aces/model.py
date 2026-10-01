@@ -32,7 +32,10 @@ HALF_LIFE_DAYS = 365
 PRIOR = {"ace": 120.0, "df": 120.0, "spw": 300.0}   # shrinkage, in pseudo serve points
 PRIOR_RET = {"ace": 400.0, "df": 1500.0, "spw": 600.0}
 SURFACE_PRIOR = 250.0           # how much surface-specific history it takes to move off overall
-SHAPE = {"ace": 6.0, "df": 8.0}  # gamma shape of the day-to-day multiplier; fitted in backtest
+# Gamma shape of the day-to-day multiplier on the rate. Walk-forward on
+# 2025-26 (every third match): aces best at 6 of 4/6/10, DFs best at the
+# widest tried, 14, so 12 for DFs.
+SHAPE = {"ace": 6.0, "df": 12.0}
 KMAX = 60
 
 
