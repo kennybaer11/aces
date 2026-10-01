@@ -2,6 +2,7 @@
 """Collect WTA singles matches with their serve statistics.
 
     python collect.py --years 2019-2026
+    python collect.py --years recent       # this season (and last, in early January)
     python collect.py --years 2026 --dry-run
 
 Every finished match's stats are cached under ./cache, so a second run costs
@@ -10,6 +11,7 @@ stored with their stats are skipped.
 """
 
 import argparse
+import datetime as dt
 import logging
 import sys
 import time
@@ -22,6 +24,11 @@ log = logging.getLogger("collect")
 
 
 def years(spec: str) -> list[int]:
+    if spec == "recent":
+        # The current season, and the last one until the middle of January,
+        # so the December events are still swept up after New Year.
+        today = dt.date.today()
+        return sorted({(today - dt.timedelta(days=14)).year, today.year})
     out = []
     for part in spec.split(","):
         a, _, b = part.partition("-")

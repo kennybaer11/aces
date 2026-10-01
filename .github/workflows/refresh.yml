@@ -1,0 +1,48 @@
+name: Daily refresh
+
+# Once a day: pull the matches finished since the last run, then settle any
+# stored lines whose match is now in. GitHub's schedules fire late - hours
+# late at busy times - which a daily job does not mind. Cron here is UTC;
+# 05:23 is after the night's matches in the Americas and before Europe's
+# order of play, so prices made in the morning see yesterday.
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:        # run it by hand from the Actions tab
+
+concurrency:
+  # Two runs upserting the same matches would be harmless but pointless.
+  group: aces-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    # The runner starts with an empty cache, but stored matches are skipped
+    # before their stats are fetched, so a routine run is the calendar plus
+    # one match list per event: a couple of minutes.
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Collect recent matches
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python collect.py --years recent
+
+      - name: Settle stored lines
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python price.py --settle
