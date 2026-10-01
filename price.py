@@ -7,7 +7,8 @@
 
 The ratings are rebuilt from every completed match in the database, so run
 collect.py first to bring them up to date. A line is stored once per
-(date, players, market, line); re-running updates its prices and prediction.
+(date, players, market, line); re-running updates its prices and prediction
+until it settles, and never after.
 """
 
 import argparse
@@ -154,7 +155,9 @@ def price(args, conn):
             ON CONFLICT (date, player_1_id, player_2_id, market, line) DO UPDATE SET
               surface=EXCLUDED.surface, over_odds=EXCLUDED.over_odds,
               under_odds=EXCLUDED.under_odds, p_over=EXCLUDED.p_over,
-              model_mean=EXCLUDED.model_mean, bet=EXCLUDED.bet, priced_at=now()""", out)
+              model_mean=EXCLUDED.model_mean, bet=EXCLUDED.bet, priced_at=now()
+            -- A settled line is history: repricing it would rewrite the record.
+            WHERE aces.line.actual IS NULL AND aces.line.void IS NOT TRUE""", out)
     conn.commit()
     print(f"\nstored {len(out)} lines")
 
