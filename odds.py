@@ -87,7 +87,7 @@ def best_line(pmf, rungs: list[tuple[int, float]], can_advise: bool):
 
 # Tours whose model has passed a walk-forward backtest. Lines of other tours
 # are priced and stored - for the comparison page - but never advised.
-VALIDATED_TOURS = {"WTA"}
+VALIDATED_TOURS = {"WTA", "ATP"}   # ATP passed its walk-forward backtest 2024-26; on since 2026-10-02
 
 
 def run(conn, dry_run: bool, advise: bool):

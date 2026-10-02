@@ -26,7 +26,7 @@ from aces.players import Players, norm
 EDGE = 0.10           # tails run ~1 point optimistic (tail_check), so a higher bar than 5%
 MIN_P = 0.30          # never advise a side the model gives less than this
 ADVISE_MARKETS = {"aces", "aces:1", "aces:2"}
-VALIDATED_TOURS = {"WTA"}   # see odds.py: other tours are priced, not advised
+VALIDATED_TOURS = {"WTA", "ATP"}   # see odds.py
 SURFACES = {"tvrdý p.": "Hard", "antuka": "Clay", "tráva": "Grass", "koberec": "Hard"}
 
 
