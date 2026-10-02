@@ -9,3 +9,5 @@ lines.txt
 backtest*.csv
 bt_*.csv
 tail_check.*
+tail_check_tour.py
+tail_check_*.log

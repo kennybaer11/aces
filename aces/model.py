@@ -236,10 +236,12 @@ class Prediction:
         return float((np.arange(len(pmf)) * pmf).sum())
 
 
-# Serve points actually played over what the simulation gives, per tour. The
-# WTA figure is fitted on 2024 (see sim.py); the ATP one on 2023, the first
-# season collected, so 2024-26 stay out of sample for it.
-LENGTH = {"WTA": sim.LENGTH, "ATP": sim.LENGTH}
+# Serve points actually played over what the simulation gives, per tour and
+# format. WTA fitted on 2024 (see sim.py). ATP fitted on Apr-Dec 2023 - the
+# first season collected, after three months for the ratings to settle - so
+# 2024-26 stay out of sample: best of three 74.7 played v 80.2 simulated on
+# 2,494 matches, best of five 114.8 v 128.1 on 359.
+LENGTH = {("WTA", 3): sim.LENGTH, ("ATP", 3): 0.932, ("ATP", 5): 0.896}
 
 
 def kelly_growth(p: float, odds: float) -> float:
@@ -257,17 +259,20 @@ def kelly_growth(p: float, odds: float) -> float:
     return p * math.log(1 + f * b) + (1 - p) * math.log(1 - f)
 
 
-def best_of(tour: str, level: str | None) -> int:
-    """Men play best of five at the Grand Slams; everything else is three."""
-    return 5 if tour == "ATP" and level == "Grand Slam" else 3
+def best_of(tour: str, level: str | None, draw: str | None = "M") -> int:
+    """Men play best of five in a Grand Slam's main draw; qualifying, and
+    everything else, is best of three."""
+    return 5 if tour == "ATP" and level == "Grand Slam" and draw != "Q" else 3
 
 
 def predict(r: Ratings, a: str, b: str, surface: str, t: float,
-            shape: dict | None = None, tour: str = "WTA", level: str | None = None) -> Prediction:
+            shape: dict | None = None, tour: str = "WTA", level: str | None = None,
+            draw: str | None = "M") -> Prediction:
     shape = shape or SHAPE
     pa = r.rate("spw", a, b, surface, t)
     pb = r.rate("spw", b, a, surface, t)
-    pts = sim.serve_points(pa, pb, best_of(tour, level), LENGTH[tour])
+    bo = best_of(tour, level, draw)
+    pts = sim.serve_points(pa, pb, bo, LENGTH[(tour, bo)])
     out = {}
     rates = {}
     for stat in ("ace", "df"):

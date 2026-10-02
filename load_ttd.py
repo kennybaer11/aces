@@ -65,7 +65,7 @@ def side(row: list) -> dict:
         "bp_saved": _int(bp_m.group(1)) if bp_m else None,
         "bp_faced": _int(bp_m.group(2)) if bp_m else None,
         "winner": "Winner" in cls.split(),
-        "retired": bool(re.search(r"Retired|ttd-ret|Walkover|ttd-wo", cls)),
+        "retired": bool(re.search(r"\b(retired|walkover)\b", cls, re.I)),
     }
 
 
@@ -73,6 +73,9 @@ def matches(rows: list):
     """Pair consecutive rows into matches."""
     pending = None
     for row in rows:
+        if len(row) < 27:            # the table's "no matches" placeholder row
+            pending = None
+            continue
         s = side(row)
         if pending is None:
             pending = s
