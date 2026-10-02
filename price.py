@@ -155,6 +155,40 @@ def settle(conn):
          WHERE m.rn = 1 AND (l.date, l.player_1_id, l.player_2_id, l.market, l.line)
              = (m.date, m.player_1_id, m.player_2_id, m.market, m.line)""")
         n = cur.rowcount
+        # The advice record, matched the same way: its kickoff date stands in
+        # for the line's date. Only the result columns are written - the
+        # aces.advice_locked trigger refuses anything else after kickoff.
+        cur.execute("""
+        WITH mm AS (
+          SELECT mt.*, COALESCE(xa.tour_id, mt.player_a_id) AS ca,
+                       COALESCE(xb.tour_id, mt.player_b_id) AS cb
+            FROM aces.match mt
+            LEFT JOIN alias xa ON xa.id = mt.player_a_id
+            LEFT JOIN alias xb ON xb.id = mt.player_b_id),
+        m AS (
+          SELECT a.source, a.event_id, a.market, mm.completed,
+                 CASE WHEN mm.ca = a.player_1_id THEN sa.aces ELSE sb.aces END AS a1,
+                 CASE WHEN mm.ca = a.player_1_id THEN sb.aces ELSE sa.aces END AS a2,
+                 row_number() OVER (PARTITION BY a.source, a.event_id, a.market
+                                    ORDER BY abs(mm.played_at::date - a.kickoff::date)) rn
+            FROM aces.advice a
+            JOIN mm ON ((a.player_1_id, a.player_2_id) = (mm.ca, mm.cb)
+                     OR (a.player_1_id, a.player_2_id) = (mm.cb, mm.ca))
+                   AND mm.played_at::date BETWEEN a.kickoff::date - 1 AND a.kickoff::date + 3
+            LEFT JOIN aces.serve sa ON (sa.tour, sa.tournament_id, sa.year, sa.match_id, sa.set_num, sa.side)
+                 = (mm.tour, mm.tournament_id, mm.year, mm.match_id, 0, 'a')
+            LEFT JOIN aces.serve sb ON (sb.tour, sb.tournament_id, sb.year, sb.match_id, sb.set_num, sb.side)
+                 = (mm.tour, mm.tournament_id, mm.year, mm.match_id, 0, 'b')
+           WHERE a.actual IS NULL AND a.void IS NOT TRUE AND a.kickoff < now())
+        UPDATE aces.advice a SET
+          void = NOT m.completed, settled_at = now(),
+          actual = CASE WHEN NOT m.completed THEN NULL
+                        WHEN a.market = 'aces'   THEN m.a1 + m.a2
+                        WHEN a.market = 'aces:1' THEN m.a1
+                        WHEN a.market = 'aces:2' THEN m.a2 END
+          FROM m
+         WHERE m.rn = 1 AND (a.source, a.event_id, a.market) = (m.source, m.event_id, m.market)""")
+        n_advice = cur.rowcount
         cur.execute("""
         SELECT count(*) FILTER (WHERE bet IS NOT NULL),
                count(*) FILTER (WHERE bet = 'over'  AND actual > line OR bet = 'under' AND actual < line),
@@ -164,7 +198,7 @@ def settle(conn):
           FROM aces.line WHERE actual IS NOT NULL""")
         bets, won, profit = cur.fetchone()
     conn.commit()
-    print(f"settled {n} lines")
+    print(f"settled {n} lines, {n_advice} advice records")
     if bets:
         print(f"bets {bets}, won {won}, profit {float(profit):+.2f} units "
               f"({float(profit) / bets:+.1%} per bet)")

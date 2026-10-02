@@ -164,3 +164,58 @@ CREATE INDEX IF NOT EXISTS event_match_key_idx ON aces.event (match_key);
 -- on the page: the advised side, or the over (under if only an under is quoted).
 ALTER TABLE aces.line ADD COLUMN IF NOT EXISTS placed    BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE aces.line ADD COLUMN IF NOT EXISTS placed_at TIMESTAMPTZ;
+
+-- The advice the site gave, as it stood when the match started - the tennis
+-- twin of posession's pl_advice. One row per bookmaker match and market that
+-- was ever advised. Rewritten on every collection while the match is still to
+-- start; a tip withdrawn before then stays, with backed = false, so the record
+-- shows it was given and taken back. From kickoff the row is locked by the
+-- trigger below: only the result (actual, void) and the admin's placed tick
+-- can still change. aces.line is the working table every priced line lives in;
+-- this is the record.
+CREATE TABLE IF NOT EXISTS aces.advice (
+  source           TEXT    NOT NULL,     -- betano | chance
+  event_id         TEXT    NOT NULL,
+  market           TEXT    NOT NULL,     -- aces, aces:1, aces:2
+  tour             TEXT,
+  kickoff          TIMESTAMPTZ NOT NULL,
+  league           TEXT,
+  player_1_id      TEXT    NOT NULL,
+  player_1         TEXT    NOT NULL,
+  player_2_id      TEXT    NOT NULL,
+  player_2         TEXT    NOT NULL,
+  line             NUMERIC NOT NULL,     -- "8+" is 7.5
+  side             TEXT    NOT NULL,     -- over | under
+  odds             NUMERIC NOT NULL,
+  p_model          NUMERIC NOT NULL,     -- the model's chance of the side
+  model_mean       NUMERIC,
+  edge             NUMERIC NOT NULL,     -- p_model * odds - 1
+  backed           BOOLEAN NOT NULL,     -- false: advised, then withdrawn before kickoff
+  code_version     TEXT,
+  first_advised_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  advised_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  actual           INTEGER,
+  void             BOOLEAN,
+  settled_at       TIMESTAMPTZ,
+  placed           BOOLEAN NOT NULL DEFAULT false,
+  placed_at        TIMESTAMPTZ,
+  PRIMARY KEY (source, event_id, market)
+);
+CREATE INDEX IF NOT EXISTS advice_kickoff_idx ON aces.advice (kickoff);
+
+CREATE OR REPLACE FUNCTION aces.advice_locked() RETURNS trigger AS $$
+BEGIN
+  IF OLD.kickoff <= now() AND
+     (NEW.line, NEW.side, NEW.odds, NEW.p_model, NEW.edge, NEW.backed, NEW.kickoff)
+       IS DISTINCT FROM
+     (OLD.line, OLD.side, OLD.odds, OLD.p_model, OLD.edge, OLD.backed, OLD.kickoff) THEN
+    RAISE EXCEPTION 'aces.advice %/%/% is locked: the match started at %',
+      OLD.source, OLD.event_id, OLD.market, OLD.kickoff;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS advice_locked ON aces.advice;
+CREATE TRIGGER advice_locked BEFORE UPDATE ON aces.advice
+  FOR EACH ROW EXECUTE FUNCTION aces.advice_locked();
+CREATE OR REPLACE RULE advice_no_delete AS ON DELETE TO aces.advice
+  WHERE OLD.kickoff <= now() DO INSTEAD NOTHING;

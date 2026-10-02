@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
-from aces import betano, db, events, model
+from aces import advice, betano, db, events, model
 from aces.players import Players
 
 log = logging.getLogger("odds")
@@ -151,6 +151,11 @@ def run(conn, dry_run: bool, advise: bool):
                              market, n, price, 100 * p, 100 * gain, "  BET" if advised else "")
             if not dry_run:
                 _save_lines(conn, rows)
+                with conn.cursor() as cur:
+                    for r in rows:
+                        advice.record(cur, {**ev, "source": "betano"}, r["market"], r["bet"] == "over",
+                                      line=r["line"], side="over", odds=r["over_odds"],
+                                      p_side=r["p_over"], model_mean=r["model_mean"])
                 conn.commit()
     log.info("done: %s", counts)
     return counts

@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-from aces import db, events, model
+from aces import advice, db, events, model
 from aces.players import Players, norm
 
 EDGE = 0.10           # tails run ~1 point optimistic (tail_check), so a higher bar than 5%
@@ -141,6 +141,10 @@ def main():
                             (ev["kickoff"].date(), ev["player_1_id"], ev["name_1"], ev["player_2_id"], ev["name_2"],
                              mk, line, ev["surface"], prices.get("over"), prices.get("under"), p,
                              float((pmf * range(len(pmf))).sum()), bet, ev["event_id"], ev["kickoff"]))
+                advice.record(cur, {**ev, "source": "chance"}, mk, bet is not None, line=line,
+                              side=bet, odds=prices.get(bet) if bet else None,
+                              p_side=(p if bet == "over" else 1 - p) if bet else None,
+                              model_mean=float((pmf * range(len(pmf))).sum()))
                 priced += 1
                 advised += bet is not None
     conn.commit()
