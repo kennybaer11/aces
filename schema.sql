@@ -157,3 +157,10 @@ ALTER TABLE aces.event ADD COLUMN IF NOT EXISTS tour TEXT;   -- WTA | ATP
 ALTER TABLE aces.odds  ADD COLUMN IF NOT EXISTS p_model NUMERIC;
 ALTER TABLE aces.event ADD COLUMN IF NOT EXISTS match_key TEXT;
 CREATE INDEX IF NOT EXISTS event_match_key_idx ON aces.event (match_key);
+
+-- Ticked on betken.cz when the admin has actually placed the bet. A placed line
+-- is frozen: the collectors neither reprice it nor delete it when the advised
+-- rung moves, so it keeps the price that was taken. The side is the one shown
+-- on the page: the advised side, or the over (under if only an under is quoted).
+ALTER TABLE aces.line ADD COLUMN IF NOT EXISTS placed    BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE aces.line ADD COLUMN IF NOT EXISTS placed_at TIMESTAMPTZ;

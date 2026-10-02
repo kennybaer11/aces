@@ -183,7 +183,7 @@ def _save_lines(conn, rows):
             cur.execute("""DELETE FROM aces.line
                             WHERE source = 'betano' AND event_id = %(event_id)s
                               AND market = %(market)s AND line <> %(line)s
-                              AND kickoff > now() AND actual IS NULL""", r)
+                              AND kickoff > now() AND actual IS NULL AND NOT placed""", r)
             cur.execute("""
                 INSERT INTO aces.line (date, player_1_id, player_1, player_2_id, player_2, market,
                                        line, surface, over_odds, under_odds, p_over, model_mean,
@@ -195,7 +195,7 @@ def _save_lines(conn, rows):
                   over_odds=EXCLUDED.over_odds, p_over=EXCLUDED.p_over,
                   model_mean=EXCLUDED.model_mean, bet=EXCLUDED.bet, surface=EXCLUDED.surface,
                   kickoff=EXCLUDED.kickoff, priced_at=now()
-                WHERE aces.line.actual IS NULL AND aces.line.void IS NOT TRUE
+                WHERE aces.line.actual IS NULL AND aces.line.void IS NOT TRUE AND NOT aces.line.placed
                   AND (aces.line.kickoff IS NULL OR aces.line.kickoff > now())""", r)
 
 

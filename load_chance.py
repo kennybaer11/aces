@@ -127,7 +127,7 @@ def main():
                        else None)
                 cur.execute("""
                     DELETE FROM aces.line WHERE source = 'chance' AND event_id = %s AND market = %s
-                       AND line <> %s AND kickoff > now() AND actual IS NULL""", (ev["event_id"], mk, line))
+                       AND line <> %s AND kickoff > now() AND actual IS NULL AND NOT placed""", (ev["event_id"], mk, line))
                 cur.execute("""
                     INSERT INTO aces.line (date, player_1_id, player_1, player_2_id, player_2, market, line,
                                            surface, over_odds, under_odds, p_over, model_mean, bet,
@@ -136,7 +136,7 @@ def main():
                     ON CONFLICT (date, player_1_id, player_2_id, market, line) DO UPDATE SET
                       over_odds=EXCLUDED.over_odds, under_odds=EXCLUDED.under_odds, p_over=EXCLUDED.p_over,
                       model_mean=EXCLUDED.model_mean, bet=EXCLUDED.bet, priced_at=now()
-                    WHERE aces.line.actual IS NULL AND aces.line.void IS NOT TRUE
+                    WHERE aces.line.actual IS NULL AND aces.line.void IS NOT TRUE AND NOT aces.line.placed
                       AND (aces.line.kickoff IS NULL OR aces.line.kickoff > now())""",
                             (ev["kickoff"].date(), ev["player_1_id"], ev["name_1"], ev["player_2_id"], ev["name_2"],
                              mk, line, ev["surface"], prices.get("over"), prices.get("under"), p,
