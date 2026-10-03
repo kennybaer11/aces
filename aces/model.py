@@ -28,7 +28,9 @@ from scipy import stats
 
 from . import sim
 
-HALF_LIFE_DAYS = 365
+import os as _os
+# How fast old matches fade. ACES_HALF_LIFE overrides it for backtests only.
+HALF_LIFE_DAYS = float(_os.environ.get("ACES_HALF_LIFE", 365))
 PRIOR = {"ace": 120.0, "df": 120.0, "spw": 300.0}   # shrinkage, in pseudo serve points
 PRIOR_RET = {"ace": 400.0, "df": 1500.0, "spw": 600.0}
 SURFACE_PRIOR = 250.0           # how much surface-specific history it takes to move off overall
