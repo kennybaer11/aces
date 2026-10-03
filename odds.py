@@ -63,13 +63,18 @@ def surface_for(conn, ev: dict) -> str:
 
 
 MIN_P = 0.30         # never advise a rung the model gives less than this
+# Never advise above this either. An edge that large against a bookmaker
+# almost always means the model is missing something - on 3 Oct 2026 Kraus's
+# last ten matches averaged 0.9 aces against the model's 2.0, and Betano's
+# 6.20 for her 3+ was right where the model's "+98%" was not.
+MAX_EDGE = 0.50
 
 
 def best_line(pmf, rungs: list[tuple[int, float]], can_advise: bool):
     """(at_least, price, p, ev, advised) for the rung this market is shown at.
 
-    Advised: of the rungs the model gives at least MIN_P and at least EDGE of
-    value, the one with the best Kelly growth (model.kelly_growth) - not the
+    Advised: of the rungs the model gives at least MIN_P and between EDGE and
+    MAX_EDGE of value, the one with the best Kelly growth (model.kelly_growth) - not the
     one with the most EV, which on Betano's ladders is nearly always the top
     rung, the long shot where the model's tail is least reliable. Unadvised:
     the rung nearest even money."""
@@ -77,7 +82,7 @@ def best_line(pmf, rungs: list[tuple[int, float]], can_advise: bool):
     for n, price in rungs:
         p = model.Prediction.over(pmf, n - 0.5)
         priced.append((n, price, p, p * price - 1))
-    ok = [r for r in priced if r[2] >= MIN_P and r[3] >= EDGE]
+    ok = [r for r in priced if r[2] >= MIN_P and EDGE <= r[3] <= MAX_EDGE]
     if can_advise and ok:
         top = max(ok, key=lambda r: model.kelly_growth(r[2], r[1]))
         return (*top, True)

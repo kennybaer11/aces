@@ -25,6 +25,7 @@ from aces.players import Players, norm
 
 EDGE = 0.10           # tails run ~1 point optimistic (tail_check), so a higher bar than 5%
 MIN_P = 0.30          # never advise a side the model gives less than this
+MAX_EDGE = 0.50       # nor one with more value than this: see odds.py
 ADVISE_MARKETS = {"aces", "aces:1", "aces:2"}
 VALIDATED_TOURS = {"WTA", "ATP"}   # see odds.py
 SURFACES = {"tvrdý p.": "Hard", "antuka": "Clay", "tráva": "Grass", "koberec": "Hard"}
@@ -119,10 +120,10 @@ def main():
                 ev_over = p * prices["over"] - 1 if "over" in prices else None
                 ev_under = (1 - p) * prices["under"] - 1 if "under" in prices else None
                 # Same rule as odds.py: the side with the best Kelly growth among
-                # those with EDGE of value and a model chance of at least MIN_P.
+                # those with EDGE to MAX_EDGE of value and a model chance of at least MIN_P.
                 sides = [(model.kelly_growth(pr, prices[sd]), sd) for sd, pr, e in
                          (("over", p, ev_over), ("under", 1 - p, ev_under))
-                         if e is not None and e >= EDGE and pr >= MIN_P]
+                         if e is not None and EDGE <= e <= MAX_EDGE and pr >= MIN_P]
                 bet = (max(sides)[1] if sides and args.advise and enough and mk in ADVISE_MARKETS
                        else None)
                 cur.execute("""
