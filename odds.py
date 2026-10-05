@@ -16,6 +16,7 @@ the record. Run collect.py first so the ratings include yesterday.
 """
 
 import argparse
+import math
 import logging
 import sys
 from datetime import datetime, timedelta, timezone
@@ -119,13 +120,14 @@ def run(conn, dry_run: bool, advise: bool):
             ev["match_key"] = events.match_key(ev["kickoff"], ev["name_1"], ev["name_2"],
                                                ev["player_1_id"], ev["player_2_id"])
             ladders = betano.event_ladders(ev)
+            games = ladders.pop("games", [])       # for the length model, not priced
             known = bool(T and ev["player_1_id"] and ev["player_2_id"])
             pred = None
             if known and ladders:
                 pred = model.predict(T["ratings"], ev["player_1_id"], ev["player_2_id"], ev["surface"],
                                      model._days(ev["kickoff"]), tour=ev["tour"], level=ev["level"])
             if not dry_run:
-                _save_event(conn, ev, fetched_at, ladders, pred)
+                _save_event(conn, ev, fetched_at, ladders, pred, games)
             if not known:
                 counts["unmatched"] += 1
                 log.info("no %s history for %s / %s", ev["tour"], ev["name_1"], ev["name_2"])
@@ -167,7 +169,7 @@ def run(conn, dry_run: bool, advise: bool):
     return counts
 
 
-def _save_event(conn, ev, fetched_at, ladders, pred):
+def _save_event(conn, ev, fetched_at, ladders, pred, games=()):
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO aces.event (source, event_id, kickoff, league, name_1, name_2,
@@ -184,6 +186,14 @@ def _save_event(conn, ev, fetched_at, ladders, pred):
                         [(ev["event_id"], fetched_at, m, n, p,
                           model.Prediction.over(pred.pmf(m), n - 0.5) if pred else None)
                          for m, rungs in ladders.items() for n, p in rungs])
+        # Total-games lines, both sides: what the bookmaker expects the
+        # match's length to be. Kept for the match-length model.
+        cur.executemany("""
+            INSERT INTO aces.odds (source, event_id, fetched_at, market, at_least, price, side)
+            VALUES ('betano', %s, %s, 'games', %s, %s, %s) ON CONFLICT DO NOTHING""",
+                        [(ev["event_id"], fetched_at, math.floor(ln) + 1, price, side)
+                         for ln, over, under in games
+                         for side, price in (("over", over), ("under", under)) if price])
 
 
 def _save_lines(conn, rows):

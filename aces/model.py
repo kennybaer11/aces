@@ -112,10 +112,11 @@ class _Acc:
     act: float = 0.0
     exp: float = 0.0
     when: float = 0.0       # days
+    half_life: float = None  # days; None is HALF_LIFE_DAYS
 
     def decay_to(self, t: float):
         if t > self.when:
-            f = 0.5 ** ((t - self.when) / HALF_LIFE_DAYS)
+            f = 0.5 ** ((t - self.when) / (self.half_life or HALF_LIFE_DAYS))
             self.act *= f
             self.exp *= f
             self.when = t
@@ -158,24 +159,34 @@ class Ratings:
     srv_surf: dict = field(default_factory=dict)    # (stat, player, surface) -> _Acc
     ret: dict = field(default_factory=dict)         # (stat, player) -> _Acc
     matches: dict = field(default_factory=dict)     # player -> decayed match count
+    venue: dict = field(default_factory=dict)       # (stat, venue) -> _Acc: court speed
 
     def _b(self, stat, surface):
         return self.base.setdefault((stat, surface), _Base()).rate(DEFAULTS[stat])
 
-    def rate(self, stat, server, returner, surface, t) -> float:
+    def _v(self, stat, venue, t) -> float:
+        """The venue's factor on a stat: 1 when off, unknown or not court-driven."""
+        if not (VENUE_PRIOR and venue and stat in VENUE_STATS):
+            return 1.0
+        acc = self.venue.setdefault((stat, venue), _Acc(half_life=VENUE_HALF_LIFE))
+        return acc.ratio(t, VENUE_PRIOR, self._b(stat, "Hard"))
+
+    def rate(self, stat, server, returner, surface, t, venue=None) -> float:
         """Expected per-point rate for `server` serving to `returner`."""
         b = self._b(stat, surface)
         overall = self.srv.setdefault((stat, server), _Acc()).ratio(t, PRIOR[stat], b)
         surf = self.srv_surf.setdefault((stat, server, surface), _Acc()).ratio(
             t, SURFACE_PRIOR, b, toward=overall)
         opp = self.ret.setdefault((stat, returner), _Acc()).ratio(t, PRIOR_RET[stat], b)
+        v = self._v(stat, venue, t)
         if stat == "spw":
             # Near a base of 0.56 the factors stay within about +-20%, so the
             # product stays a probability; the clip is a guard, not a model.
-            return float(np.clip(b * surf * opp, 0.30, 0.85))
-        return b * surf * opp
+            return float(np.clip(b * surf * opp * v, 0.30, 0.85))
+        return b * surf * opp * v
 
     def update(self, row, t):
+        venue = venue_key(row)
         for s, r in (("a", "b"), ("b", "a")):
             server, returner = row[f"player_{s}_id"], row[f"player_{r}_id"]
             n = row[f"sp_{s}"]
@@ -186,10 +197,19 @@ class Ratings:
                 b = self._b(stat, row["surface"])
                 opp = self.ret.setdefault((stat, returner), _Acc()).ratio(t, PRIOR_RET[stat], b)
                 srvr = self.srv.setdefault((stat, server), _Acc()).ratio(t, PRIOR[stat], b)
-                for acc, expected in (
-                        (self.srv[(stat, server)], b * opp * n),
-                        (self.srv_surf.setdefault((stat, server, row["surface"]), _Acc()), b * opp * n),
-                        (self.ret[(stat, returner)], b * srvr * n)):
+                surf = self.srv_surf.setdefault((stat, server, row["surface"]), _Acc()).ratio(
+                    t, SURFACE_PRIOR, b, toward=srvr)
+                # The court's share is taken out of what the players are
+                # credited with, so a player who plays fast events is not
+                # rated a bigger server for it - and the court is credited
+                # with what the players would not have done elsewhere.
+                v = self._v(stat, venue, t)
+                accs = [(self.srv[(stat, server)], b * opp * v * n),
+                        (self.srv_surf[(stat, server, row["surface"])], b * opp * v * n),
+                        (self.ret[(stat, returner)], b * srvr * v * n)]
+                if VENUE_PRIOR and venue and stat in VENUE_STATS:
+                    accs.append((self.venue[(stat, venue)], b * surf * opp * n))
+                for acc, expected in accs:
                     acc.decay_to(t)
                     acc.act += k
                     acc.exp += expected
@@ -198,6 +218,20 @@ class Ratings:
                            ("spw", ("spw_a", "spw_b"))):
             k = sum(row[c] for c in cols)
             self.base.setdefault((stat, row["surface"]), _Base()).add(t, k, row["sp_a"] + row["sp_b"])
+
+
+# Court speed per tournament. VENUE_PRIOR pseudo serve points pull a venue's
+# factor towards 1 until it has history of its own; 0 switches it off.
+# ACES_VENUE_PRIOR overrides it for backtests.
+VENUE_PRIOR = float(_os.environ.get("ACES_VENUE_PRIOR", 0))
+VENUE_HALF_LIFE = 730.0      # courts change slowly
+VENUE_STATS = ("ace", "spw")
+
+
+def venue_key(row) -> str | None:
+    """One key per tournament across years: the tour's own tournament id."""
+    tid = row.get("tournament_id") if hasattr(row, "get") else None
+    return f"{row.get('tour', '')}:{tid}" if tid else None
 
 
 def _days(ts) -> float:
@@ -269,17 +303,17 @@ def best_of(tour: str, level: str | None, draw: str | None = "M") -> int:
 
 def predict(r: Ratings, a: str, b: str, surface: str, t: float,
             shape: dict | None = None, tour: str = "WTA", level: str | None = None,
-            draw: str | None = "M") -> Prediction:
+            draw: str | None = "M", venue: str | None = None) -> Prediction:
     shape = shape or SHAPE
-    pa = r.rate("spw", a, b, surface, t)
-    pb = r.rate("spw", b, a, surface, t)
+    pa = r.rate("spw", a, b, surface, t, venue)
+    pb = r.rate("spw", b, a, surface, t, venue)
     bo = best_of(tour, level, draw)
     pts = sim.serve_points(pa, pb, bo, LENGTH[(tour, bo)])
     out = {}
     rates = {}
     for stat in ("ace", "df"):
-        qa = r.rate(stat, a, b, surface, t)
-        qb = r.rate(stat, b, a, surface, t)
+        qa = r.rate(stat, a, b, surface, t, venue)
+        qb = r.rate(stat, b, a, surface, t, venue)
         rates[stat] = (qa, qb)
         pa_k = _nb_pmf(qa * pts[:, 0], shape[stat])
         pb_k = _nb_pmf(qb * pts[:, 1], shape[stat])

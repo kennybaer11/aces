@@ -102,7 +102,8 @@ def main():
                   player_1_id=EXCLUDED.player_1_id, player_2_id=EXCLUDED.player_2_id,
                   tour=EXCLUDED.tour, match_key=EXCLUDED.match_key, last_seen=now()""", ev)
             for mk, line, prices in ev["lines"]:
-                p_rung = model.Prediction.over(pred.pmf(mk), line) if pred else None
+                p_rung = (model.Prediction.over(pred.pmf(mk), line)
+                          if pred and mk != "games" else None)
                 for side, price in prices.items():
                     cur.execute("""INSERT INTO aces.odds (source, event_id, fetched_at, market, at_least,
                                                           price, side, p_model)
@@ -115,6 +116,8 @@ def main():
             enough = (ev["tour"] in VALIDATED_TOURS
                       and min(s.get(ev["player_1_id"], 0), s.get(ev["player_2_id"], 0)) >= 10)
             for mk, line, prices in ev["lines"]:
+                if mk == "games":
+                    continue                 # stored above for the length model, not priced
                 pmf = pred.pmf(mk)
                 p = model.Prediction.over(pmf, line)
                 ev_over = p * prices["over"] - 1 if "over" in prices else None

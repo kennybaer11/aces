@@ -11,3 +11,7 @@ bt_*.csv
 tail_check.*
 tail_check_tour.py
 tail_check_*.log
+lowace_*.log
+bt_venue_*
+venue_runs.sh
+lowace_check.py

@@ -139,7 +139,7 @@ def main():
         if row["played_at"] >= start and (args.every == 1 or zlib.crc32((row["match_id"] + row["tournament_id"]).encode()) % args.every == 0):
             score(row, model.predict(r, row["player_a_id"], row["player_b_id"],
                                      row["surface"], t, shape, args.tour, row["level"],
-                                     row["draw"]), r)
+                                     row["draw"], model.venue_key(row)), r)
         r.update(row, t)
         learn_baseline(row)
 

@@ -122,8 +122,18 @@ def event_ladders(event: dict) -> dict[str, list[tuple[int, float]]]:
 
 
 def _ladders(ev: dict) -> dict:
+    """Ace and DF ladders, plus "games": the match's total-games lines as
+    (line, over, under) - stored for the match-length model, never priced."""
     out = {}
+    games = {}
     for m in ev.get("markets", []):
+        if str(m.get("type")) == "FTGO":                    # "Gamy": total games
+            for s in m.get("selections", []):
+                hit = re.match(r"\s*(Více|Méně) než ([\d.]+)", s.get("name", ""))
+                if hit and s.get("price"):
+                    g = games.setdefault(float(hit.group(2)), {})
+                    g["over" if hit.group(1) == "Více" else "under"] = float(s["price"])
+            continue
         market = MARKETS.get(str(m.get("type")))
         if not market:
             continue
@@ -134,4 +144,6 @@ def _ladders(ev: dict) -> dict:
                 rungs.append((int(hit.group(1)), float(s["price"])))
         if rungs:
             out[market] = sorted(rungs)
+    if games:
+        out["games"] = sorted((ln, q.get("over"), q.get("under")) for ln, q in games.items())
     return out
