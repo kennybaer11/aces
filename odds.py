@@ -161,6 +161,7 @@ def run(conn, dry_run: bool, advise: bool):
                         advice.record(cur, {**ev, "source": "betano"}, r["market"], r["bet"] == "over",
                                       line=r["line"], side="over", odds=r["over_odds"],
                                       p_side=r["p_over"], model_mean=r["model_mean"])
+                    advice.share_stakes(cur, ev["match_key"])
                 conn.commit()
     log.info("done: %s", counts)
     return counts

@@ -219,3 +219,20 @@ CREATE TRIGGER advice_locked BEFORE UPDATE ON aces.advice
   FOR EACH ROW EXECUTE FUNCTION aces.advice_locked();
 CREATE OR REPLACE RULE advice_no_delete AS ON DELETE TO aces.advice
   WHERE OLD.kickoff <= now() DO INSTEAD NOTHING;
+
+-- The advised stake, 1-10 tenths of a unit: quarter Kelly, scaled down for long
+-- odds, and shared out between tips on the same match (aces/advice.py). Part of
+-- the tip, so locked at kickoff with it; tips advised before 5 Oct 2026 have
+-- none, rather than one made up after the fact.
+ALTER TABLE aces.advice ADD COLUMN IF NOT EXISTS rating SMALLINT;
+CREATE OR REPLACE FUNCTION aces.advice_locked() RETURNS trigger AS $$
+BEGIN
+  IF OLD.kickoff <= now() AND
+     (NEW.line, NEW.side, NEW.odds, NEW.p_model, NEW.edge, NEW.backed, NEW.kickoff, NEW.rating)
+       IS DISTINCT FROM
+     (OLD.line, OLD.side, OLD.odds, OLD.p_model, OLD.edge, OLD.backed, OLD.kickoff, OLD.rating) THEN
+    RAISE EXCEPTION 'aces.advice %/%/% is locked: the match started at %',
+      OLD.source, OLD.event_id, OLD.market, OLD.kickoff;
+  END IF;
+  RETURN NEW;
+END $$ LANGUAGE plpgsql;

@@ -148,6 +148,8 @@ def main():
                               model_mean=float((pmf * range(len(pmf))).sum()))
                 priced += 1
                 advised += bet is not None
+            if pred is not None:
+                advice.share_stakes(cur, ev["match_key"])
     conn.commit()
     unmatched = sum(1 for e in matches.values() if not (e["player_1_id"] and e["player_2_id"]))
     print(f"{len(matches)} matches, {stored} prices stored, {priced} lines priced, "

@@ -29,6 +29,50 @@ def code_version():
     return _VERSION or None
 
 
+def stake(p: float, odds: float) -> int:
+    """The advised stake for one tip, 1-10 tenths of a unit.
+
+    The model decides whether to bet; how much leans on the market too. The
+    probability is blended half and half with the bookmaker's (1 / odds)
+    before Kelly, so a tip is staked on an edge the model can be partly wrong
+    about - otherwise a short price at a confident 81% (Rakhimova, 5 Oct 2026:
+    0 aces) draws the biggest stake. Then quarter Kelly, read as 1% of a
+    bankroll per tenth, and scaled down above odds of 3.0, where the model's
+    tail runs optimistic. Typical tips land at 1-5."""
+    p = (p + 1 / odds) / 2
+    b = odds - 1
+    kelly = (p * odds - 1) / b if b > 0 else 0.0
+    quarter = max(kelly, 0.0) / 4 * min(1.0, 3.0 / odds)
+    return max(1, min(10, round(quarter * 100)))
+
+
+def share_stakes(cur, match_key: str):
+    """One stake per match, not one per tip.
+
+    Tips on the same match - at any bookmaker - win or lose together with the
+    match's length, so together they get no more than the largest of them
+    alone, shared in proportion. Placed tips keep the rating they were placed
+    at and use up their part of it; only open, unplaced tips are adjusted."""
+    cur.execute("""
+        SELECT a.source, a.event_id, a.market, a.p_model::float, a.odds::float, a.placed, a.rating
+          FROM aces.advice a JOIN aces.event e USING (source, event_id)
+         WHERE e.match_key = %s AND a.backed AND a.kickoff > now()""", (match_key,))
+    tips = cur.fetchall()
+    if not tips:
+        return
+    own = {(s, e, m): (r if placed and r else stake(p, o)) for s, e, m, p, o, placed, r in tips}
+    budget = max(own.values())
+    placed_total = sum(own[(s, e, m)] for s, e, m, _p, _o, placed, _r in tips if placed)
+    free = [(s, e, m) for s, e, m, _p, _o, placed, _r in tips if not placed]
+    room = max(budget - placed_total, len(free))      # at least 1 each
+    want = sum(own[k] for k in free)
+    for k in free:
+        rating = max(1, round(own[k] * min(1.0, room / want))) if want else 1
+        cur.execute("""UPDATE aces.advice SET rating = %s
+                        WHERE (source, event_id, market) = (%s, %s, %s)
+                          AND kickoff > now() AND NOT placed""", (rating, *k))
+
+
 def record(cur, ev: dict, market: str, advised: bool, line: float = None,
            side: str = None, odds: float = None, p_side: float = None,
            model_mean: float = None):
