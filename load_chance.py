@@ -117,23 +117,27 @@ def main():
             s = seen[ev["tour"]]
             enough = (ev["tour"] in VALIDATED_TOURS
                       and min(s.get(ev["player_1_id"], 0), s.get(ev["player_2_id"], 0)) >= 10)
+            # Chance can quote several lines in one market (aces 8.5, 9.5, ...):
+            # each is priced and stored, and the market's advice is the best of
+            # them by Kelly growth - one record per market, as on Betano.
+            best, means, offered = {}, {}, {}
             for mk, line, prices in ev["lines"]:
                 if mk == "games":
                     continue                 # stored above for the length model, not priced
                 pmf = pred.pmf(mk)
                 p = model.Prediction.over(pmf, line)
+                means[mk] = float((pmf * range(len(pmf))).sum())
+                offered.setdefault(mk, []).append(line)
                 ev_over = p * prices["over"] - 1 if "over" in prices else None
                 ev_under = (1 - p) * prices["under"] - 1 if "under" in prices else None
                 # Same rule as odds.py: the side with the best Kelly growth among
                 # those with EDGE to MAX_EDGE of value and a model chance of at least MIN_P.
-                sides = [(model.kelly_growth(pr, prices[sd]), sd) for sd, pr, e in
+                sides = [(model.kelly_growth(pr, prices[sd]), sd, pr) for sd, pr, e in
                          (("over", p, ev_over), ("under", 1 - p, ev_under))
                          if e is not None and EDGE <= e <= MAX_EDGE and pr >= MIN_P]
-                bet = (max(sides)[1] if sides and args.advise and enough and mk in ADVISE_MARKETS
-                       else None)
-                cur.execute("""
-                    DELETE FROM aces.line WHERE source = 'chance' AND event_id = %s AND market = %s
-                       AND line <> %s AND kickoff > now() AND actual IS NULL AND NOT placed""", (ev["event_id"], mk, line))
+                pick = max(sides) if sides and args.advise and enough and mk in ADVISE_MARKETS else None
+                if pick and (mk not in best or pick[0] > best[mk][0]):
+                    best[mk] = (pick[0], pick[1], pick[2], line, prices[pick[1]])
                 cur.execute("""
                     INSERT INTO aces.line (date, player_1_id, player_1, player_2_id, player_2, market, line,
                                            surface, over_odds, under_odds, p_over, model_mean, bet,
@@ -146,13 +150,24 @@ def main():
                       AND (aces.line.kickoff IS NULL OR aces.line.kickoff > now())""",
                             (ev["kickoff"].date(), ev["player_1_id"], ev["name_1"], ev["player_2_id"], ev["name_2"],
                              mk, line, ev["surface"], prices.get("over"), prices.get("under"), p,
-                             float((pmf * range(len(pmf))).sum()), bet, ev["event_id"], ev["kickoff"]))
-                advice.record(cur, {**ev, "source": "chance"}, mk, bet is not None, line=line,
-                              side=bet, odds=prices.get(bet) if bet else None,
-                              p_side=(p if bet == "over" else 1 - p) if bet else None,
-                              model_mean=float((pmf * range(len(pmf))).sum()))
+                             means[mk], pick[1] if pick else None, ev["event_id"], ev["kickoff"]))
                 priced += 1
-                advised += bet is not None
+            for mk, lines in offered.items():
+                # Lines no longer offered go; only the market's best keeps its bet.
+                cur.execute("""
+                    DELETE FROM aces.line WHERE source = 'chance' AND event_id = %s AND market = %s
+                       AND NOT (line = ANY(%s)) AND kickoff > now() AND actual IS NULL AND NOT placed""",
+                            (ev["event_id"], mk, lines))
+                b = best.get(mk)
+                cur.execute("""
+                    UPDATE aces.line SET bet = NULL WHERE source = 'chance' AND event_id = %s AND market = %s
+                       AND line <> %s AND kickoff > now() AND actual IS NULL AND NOT placed""",
+                            (ev["event_id"], mk, b[3] if b else -1))
+                advice.record(cur, {**ev, "source": "chance"}, mk, b is not None,
+                              line=b[3] if b else None, side=b[1] if b else None,
+                              odds=b[4] if b else None, p_side=b[2] if b else None,
+                              model_mean=means[mk])
+                advised += b is not None
             if pred is not None:
                 advice.share_stakes(cur, ev["match_key"])
     conn.commit()
