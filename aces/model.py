@@ -222,8 +222,10 @@ class Ratings:
 
 # Court speed per tournament. VENUE_PRIOR pseudo serve points pull a venue's
 # factor towards 1 until it has history of its own; 0 switches it off.
-# ACES_VENUE_PRIOR overrides it for backtests.
-VENUE_PRIOR = float(_os.environ.get("ACES_VENUE_PRIOR", 0))
+# ACES_VENUE_PRIOR overrides it for backtests. Adopted 6 Oct 2026: from 2025
+# on, ace logloss 1.8253 -> 1.8156 (WTA) and 2.5556 -> 2.5388 (ATP), total-ace
+# MAE 2.33 -> 2.27 and 4.50 -> 4.38; DFs unchanged (4000 was a shade worse).
+VENUE_PRIOR = float(_os.environ.get("ACES_VENUE_PRIOR", 1500))
 VENUE_HALF_LIFE = 730.0      # courts change slowly
 VENUE_STATS = ("ace", "spw")
 

@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
 
-from aces import advice, betano, db, events, model
+from aces import advice, betano, db, events, model, venues
 from aces.players import Players
 
 log = logging.getLogger("odds")
@@ -103,7 +103,7 @@ def run(conn, dry_run: bool, advise: bool):
         if hist.empty:
             continue
         tours[tour] = {
-            "players": Players(conn, tour), "ratings": model.walk(hist),
+            "players": Players(conn, tour), "ratings": model.walk(hist), "venues": venues.Venues(conn, tour),
             "seen": hist.player_a_id.value_counts().add(hist.player_b_id.value_counts(), fill_value=0)}
         log.info("%s ratings from %d matches up to %s", tour, len(hist), hist.played_at.max())
 
@@ -125,7 +125,8 @@ def run(conn, dry_run: bool, advise: bool):
             pred = None
             if known and ladders:
                 pred = model.predict(T["ratings"], ev["player_1_id"], ev["player_2_id"], ev["surface"],
-                                     model._days(ev["kickoff"]), tour=ev["tour"], level=ev["level"])
+                                     model._days(ev["kickoff"]), tour=ev["tour"], level=ev["level"],
+                                     venue=T["venues"].key(ev["league"]))
             if not dry_run:
                 _save_event(conn, ev, fetched_at, ladders, pred, games)
             if not known:

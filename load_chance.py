@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-from aces import advice, db, events, model
+from aces import advice, db, events, model, venues
 from aces.players import Players, norm
 
 EDGE = 0.10           # tails run ~1 point optimistic (tail_check), so a higher bar than 5%
@@ -71,9 +71,10 @@ def main():
         if prices:
             ev["lines"].append((mk, float(line), prices))
 
-    ratings, players, seen = {}, {}, {}
+    ratings, players, seen, V = {}, {}, {}, {}
     for tour in {e["tour"] for e in matches.values()}:
         players[tour] = Players(conn, tour)
+        V[tour] = venues.Venues(conn, tour)
         hist = model.load(conn, tour)
         if len(hist):
             ratings[tour] = model.walk(hist)
@@ -92,7 +93,8 @@ def main():
             if r and ev["player_1_id"] and ev["player_2_id"]:
                 level = "Grand Slam" if any(s in ev["league"] for s in ("Australian", "Roland", "Wimbledon", "US Open")) else None
                 pred = model.predict(r, ev["player_1_id"], ev["player_2_id"], ev["surface"],
-                                     model._days(ev["kickoff"]), tour=ev["tour"], level=level)
+                                     model._days(ev["kickoff"]), tour=ev["tour"], level=level,
+                                     venue=V[ev["tour"]].key(ev["league"]))
             cur.execute("""
                 INSERT INTO aces.event (source, event_id, kickoff, league, name_1, name_2,
                                         player_1_id, player_2_id, surface, tour, match_key)
