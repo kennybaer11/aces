@@ -16,6 +16,13 @@ match:
 rows of a match are consecutive, the second carrying ttd-match-end, and the
 winner's row the class Winner. The site has no player ids, so a player is
 keyed by the name as it writes it ("Machac T."), prefixed "ttd:".
+
+Since 6 Oct 2026 the site orders its columns differently (player first, type
+after location), so read each cell by its class - td.column-type, -surface,
+-level, -location, -round, -year, -date, -player, -set1..5, -serves,
+-firstserve, -secondserve, -aces, -df, -firstservep, -firstservew,
+-secondservew, -bp, -odds - into the order above. A fetch() of a filtered
+page gets a "Loading data" stub; open the page in the tab and read the DOM.
 """
 
 import hashlib
