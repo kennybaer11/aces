@@ -110,7 +110,9 @@ def event_ladders(event: dict) -> dict[str, list[tuple[int, float]]]:
     path = "/api" + event["url"]
     data = _get(path)
     found = _ladders(data.get("event", {}))
-    if not found:
+    # The landing tab can carry the games line without any ace or DF ladder,
+    # so look for the ladders themselves, not for "anything found".
+    if not any(k != "games" for k in found):
         # The landing tab is "popular"; the ladders live on the "all" tab,
         # whose number the response itself gives.
         tabs = data.get("markets") or data.get("nonBetBuilderTabs") or []
