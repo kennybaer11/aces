@@ -180,7 +180,7 @@ def _save_event(conn, ev, fetched_at, ladders, pred, games=()):
             ON CONFLICT (source, event_id) DO UPDATE SET kickoff=EXCLUDED.kickoff,
               player_1_id=EXCLUDED.player_1_id, player_2_id=EXCLUDED.player_2_id,
               surface=EXCLUDED.surface, tour=EXCLUDED.tour, match_key=EXCLUDED.match_key,
-              last_seen=now()""", ev)
+              url=EXCLUDED.url, last_seen=now()""", ev)
         cur.executemany("""
             INSERT INTO aces.odds (source, event_id, fetched_at, market, at_least, price, side, p_model)
             VALUES ('betano', %s, %s, %s, %s, %s, 'over', %s) ON CONFLICT DO NOTHING""",

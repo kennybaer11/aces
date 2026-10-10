@@ -61,7 +61,9 @@ def main():
         ev = matches.setdefault(str(mid), {
             "event_id": str(mid), "kickoff": datetime.fromisoformat(start), "league": comp,
             "name_1": home, "name_2": away, "tour": "WTA" if comp.startswith("WTA") else "ATP",
-            "surface": surface_of(comp), "lines": []})
+            "surface": surface_of(comp), "lines": [],
+            # The match page: Chance redirects to the live page once it starts.
+            "url": f"/kurzy/zapas/tenis-{'-'.join(norm(home + ' ' + away).split())}/{mid}/co-se-sazi"})
         if mk.endswith(":p"):
             who = which_player(box, home, away)
             if not who:
@@ -97,10 +99,10 @@ def main():
                                      venue=V[ev["tour"]].key(ev["league"]))
             cur.execute("""
                 INSERT INTO aces.event (source, event_id, kickoff, league, name_1, name_2,
-                                        player_1_id, player_2_id, surface, tour, match_key)
+                                        player_1_id, player_2_id, surface, tour, match_key, url)
                 VALUES ('chance', %(event_id)s, %(kickoff)s, %(league)s, %(name_1)s, %(name_2)s,
-                        %(player_1_id)s, %(player_2_id)s, %(surface)s, %(tour)s, %(match_key)s)
-                ON CONFLICT (source, event_id) DO UPDATE SET kickoff=EXCLUDED.kickoff,
+                        %(player_1_id)s, %(player_2_id)s, %(surface)s, %(tour)s, %(match_key)s, %(url)s)
+                ON CONFLICT (source, event_id) DO UPDATE SET kickoff=EXCLUDED.kickoff, url=EXCLUDED.url,
                   player_1_id=EXCLUDED.player_1_id, player_2_id=EXCLUDED.player_2_id,
                   tour=EXCLUDED.tour, match_key=EXCLUDED.match_key, last_seen=now()""", ev)
             for mk, line, prices in ev["lines"]:
