@@ -29,6 +29,10 @@ BASE = "https://www.betano.cz"
 GAP = 1.0
 MARKETS = {"5322": "aces", "5324": "aces:1", "5325": "aces:2",
            "5323": "df", "5326": "df:1", "5327": "df:2"}
+# The same markets as two-way lines, over and under ("Více/Méně než 12.5"):
+# the only way to bet an under at Betano.
+TWO_WAY = {"X150": "aces", "P1TA": "aces:1", "P2TA": "aces:2",
+           "TDBF": "df", "P1DF": "df:1", "P2DF": "df:2"}
 
 _s = requests.Session()
 _s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -112,28 +116,35 @@ def event_ladders(event: dict) -> dict[str, list[tuple[int, float]]]:
     found = _ladders(data.get("event", {}))
     # The landing tab can carry the games line without any ace or DF ladder,
     # so look for the ladders themselves, not for "anything found".
-    if not any(k != "games" for k in found):
+    if not any(k in MARKETS.values() for k in found):
         # The landing tab is "popular"; the ladders live on the "all" tab,
         # whose number the response itself gives.
         tabs = data.get("markets") or data.get("nonBetBuilderTabs") or []
         want = [t["id"] for t in tabs if t.get("type") in ("aces", "doublefaults")]
         alls = [t["id"] for t in tabs if t.get("type") == "allmarkets"]
         for bt in (alls[:1] or want):
-            found.update(_ladders(_get(f"{path}?bt={bt}").get("event", {})))
+            more = _ladders(_get(f"{path}?bt={bt}").get("event", {}))
+            two = {**found.get("two_way", {}), **more.pop("two_way", {})}
+            found.update(more)
+            if two:
+                found["two_way"] = two
     return found
 
 
 def _ladders(ev: dict) -> dict:
     """Ace and DF ladders, plus "games": the match's total-games lines as
-    (line, over, under) - stored for the match-length model, never priced."""
+    (line, over, under) - stored for the match-length model, never priced -
+    and "two_way": {market: [(line, over, under)]}, the over/under lines."""
     out = {}
-    games = {}
+    games, two = {}, {}
     for m in ev.get("markets", []):
-        if str(m.get("type")) == "FTGO":                    # "Gamy": total games
+        kind = str(m.get("type"))
+        if kind == "FTGO" or kind in TWO_WAY:               # "Gamy", or an over/under line
+            into = games if kind == "FTGO" else two.setdefault(TWO_WAY[kind], {})
             for s in m.get("selections", []):
                 hit = re.match(r"\s*(Více|Méně) než ([\d.]+)", s.get("name", ""))
                 if hit and s.get("price"):
-                    g = games.setdefault(float(hit.group(2)), {})
+                    g = into.setdefault(float(hit.group(2)), {})
                     g["over" if hit.group(1) == "Více" else "under"] = float(s["price"])
             continue
         market = MARKETS.get(str(m.get("type")))
@@ -148,4 +159,7 @@ def _ladders(ev: dict) -> dict:
             out[market] = sorted(rungs)
     if games:
         out["games"] = sorted((ln, q.get("over"), q.get("under")) for ln, q in games.items())
+    if two:
+        out["two_way"] = {mk: sorted((ln, q.get("over"), q.get("under")) for ln, q in lines.items())
+                          for mk, lines in two.items()}
     return out

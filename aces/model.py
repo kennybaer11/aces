@@ -160,6 +160,7 @@ class Ratings:
     ret: dict = field(default_factory=dict)         # (stat, player) -> _Acc
     matches: dict = field(default_factory=dict)     # player -> decayed match count
     venue: dict = field(default_factory=dict)       # (stat, venue) -> _Acc: court speed
+    drift: dict = field(default_factory=dict)       # stat -> _Acc: the tour's recent level
 
     def _b(self, stat, surface):
         return self.base.setdefault((stat, surface), _Base()).rate(DEFAULTS[stat])
@@ -171,6 +172,14 @@ class Ratings:
         acc = self.venue.setdefault((stat, venue), _Acc(half_life=VENUE_HALF_LIFE))
         return acc.ratio(t, VENUE_PRIOR, self._b(stat, "Hard"))
 
+    def _d(self, stat, t) -> float:
+        """The tour's recent level on a stat against what the ratings expect:
+        conditions that move every player at once (balls, a swing of events)."""
+        if not (DRIFT_HALF_LIFE and stat in DRIFT_STATS):
+            return 1.0
+        acc = self.drift.setdefault(stat, _Acc(half_life=DRIFT_HALF_LIFE))
+        return acc.ratio(t, DRIFT_PRIOR, self._b(stat, "Hard"))
+
     def rate(self, stat, server, returner, surface, t, venue=None) -> float:
         """Expected per-point rate for `server` serving to `returner`."""
         b = self._b(stat, surface)
@@ -178,7 +187,7 @@ class Ratings:
         surf = self.srv_surf.setdefault((stat, server, surface), _Acc()).ratio(
             t, SURFACE_PRIOR, b, toward=overall)
         opp = self.ret.setdefault((stat, returner), _Acc()).ratio(t, PRIOR_RET[stat], b)
-        v = self._v(stat, venue, t)
+        v = self._v(stat, venue, t) * self._d(stat, t)
         if stat == "spw":
             # Near a base of 0.56 the factors stay within about +-20%, so the
             # product stays a probability; the clip is a guard, not a model.
@@ -203,12 +212,15 @@ class Ratings:
                 # credited with, so a player who plays fast events is not
                 # rated a bigger server for it - and the court is credited
                 # with what the players would not have done elsewhere.
-                v = self._v(stat, venue, t)
+                vf, d = self._v(stat, venue, t), self._d(stat, t)
+                v = vf * d
                 accs = [(self.srv[(stat, server)], b * opp * v * n),
                         (self.srv_surf[(stat, server, row["surface"])], b * opp * v * n),
                         (self.ret[(stat, returner)], b * srvr * v * n)]
                 if VENUE_PRIOR and venue and stat in VENUE_STATS:
-                    accs.append((self.venue[(stat, venue)], b * surf * opp * n))
+                    accs.append((self.venue[(stat, venue)], b * surf * opp * d * n))
+                if DRIFT_HALF_LIFE and stat in DRIFT_STATS:
+                    accs.append((self.drift[stat], b * surf * opp * vf * n))
                 for acc, expected in accs:
                     acc.decay_to(t)
                     acc.act += k
@@ -227,7 +239,14 @@ class Ratings:
 # MAE 2.33 -> 2.27 and 4.50 -> 4.38; DFs unchanged (4000 was a shade worse).
 VENUE_PRIOR = float(_os.environ.get("ACES_VENUE_PRIOR", 1500))
 VENUE_HALF_LIFE = 730.0      # courts change slowly
-VENUE_STATS = ("ace", "spw")
+VENUE_STATS = tuple(_os.environ.get("ACES_VENUE_STATS", "ace,spw").split(","))
+
+# The tour's recent level, per stat: a short memory of how far every player
+# has been from their ratings lately. 0 switches it off; the ACES_DRIFT_*
+# variables are for backtests.
+DRIFT_HALF_LIFE = float(_os.environ.get("ACES_DRIFT_HL", 0))
+DRIFT_PRIOR = float(_os.environ.get("ACES_DRIFT_PRIOR", 2000))
+DRIFT_STATS = tuple(_os.environ.get("ACES_DRIFT_STATS", "df").split(","))
 
 
 def venue_key(row) -> str | None:

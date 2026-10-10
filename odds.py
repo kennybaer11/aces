@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Collect Betano's WTA ace and double-fault ladders and price them.
+"""Collect Betano's ace and double-fault ladders and over/under lines, and price them.
 
     python odds.py              collect, store, price - no advice
     python odds.py --advise     ... and advise bets that clear EDGE
@@ -71,24 +71,32 @@ MIN_P = 0.30         # never advise a rung the model gives less than this
 MAX_EDGE = 0.50
 
 
-def best_line(pmf, rungs: list[tuple[int, float]], can_advise: bool):
-    """(at_least, price, p, ev, advised) for the rung this market is shown at.
-
-    Advised: of the rungs the model gives at least MIN_P and between EDGE and
-    MAX_EDGE of value, the one with the best Kelly growth (model.kelly_growth) - not the
-    one with the most EV, which on Betano's ladders is nearly always the top
-    rung, the long shot where the model's tail is least reliable. Unadvised:
-    the rung nearest even money."""
-    priced = []
+def best_bet(pmf, rungs: list[tuple[int, float]], two_way: list, can_advise: bool) -> dict:
+    """The line this market is shown at, from the ladder's over rungs and the
+    two-way over/under lines together. Advised: of the sides the model gives
+    at least MIN_P and EDGE to MAX_EDGE of value, the one with the best Kelly
+    growth (model.kelly_growth) - not the most EV, which on a ladder is nearly
+    always the top rung, the long shot where the model's tail is least
+    reliable - so an under can win. Unadvised: the ladder's rung nearest
+    even money, or the two-way line when there is no ladder."""
+    cands = []
     for n, price in rungs:
         p = model.Prediction.over(pmf, n - 0.5)
-        priced.append((n, price, p, p * price - 1))
-    ok = [r for r in priced if r[2] >= MIN_P and EDGE <= r[3] <= MAX_EDGE]
+        cands.append({"line": n - 0.5, "side": "over", "price": price, "p": p, "p_over": p,
+                      "over_odds": price, "under_odds": None, "ladder": True})
+    for ln, over, under in two_way:
+        p = model.Prediction.over(pmf, ln)
+        for side, price, ps in (("over", over, p), ("under", under, 1 - p)):
+            if price and price > 1.01:
+                cands.append({"line": ln, "side": side, "price": price, "p": ps, "p_over": p,
+                              "over_odds": over, "under_odds": under, "ladder": False})
+    for c in cands:
+        c["ev"] = c["p"] * c["price"] - 1
+    ok = [c for c in cands if c["p"] >= MIN_P and EDGE <= c["ev"] <= MAX_EDGE]
     if can_advise and ok:
-        top = max(ok, key=lambda r: model.kelly_growth(r[2], r[1]))
-        return (*top, True)
-    even = min(priced, key=lambda r: abs(r[1] - 2.0))
-    return (*even, False)
+        return {**max(ok, key=lambda c: model.kelly_growth(c["p"], c["price"])), "advised": True}
+    pool = [c for c in cands if c["ladder"]] or cands
+    return {**min(pool, key=lambda c: abs(c["price"] - 2.0)), "advised": False}
 
 
 # Tours whose model has passed a walk-forward backtest. Lines of other tours
@@ -121,6 +129,7 @@ def run(conn, dry_run: bool, advise: bool):
                                                ev["player_1_id"], ev["player_2_id"])
             ladders = betano.event_ladders(ev)
             games = ladders.pop("games", [])       # for the length model, not priced
+            two_way = ladders.pop("two_way", {})    # over/under lines: the unders
             known = bool(T and ev["player_1_id"] and ev["player_2_id"])
             pred = None
             if known and ladders:
@@ -128,49 +137,55 @@ def run(conn, dry_run: bool, advise: bool):
                                      model._days(ev["kickoff"]), tour=ev["tour"], level=ev["level"],
                                      venue=T["venues"].key(ev["league"]))
             if not dry_run:
-                _save_event(conn, ev, fetched_at, ladders, pred, games)
+                _save_event(conn, ev, fetched_at, ladders, pred, games, two_way)
             if not known:
                 counts["unmatched"] += 1
                 log.info("no %s history for %s / %s", ev["tour"], ev["name_1"], ev["name_2"])
                 continue
-            if not ladders:
+            if not ladders and not two_way:
                 continue
             enough = (advise and ev["tour"] in VALIDATED_TOURS
                       and min(T["seen"].get(ev["player_1_id"], 0),
                               T["seen"].get(ev["player_2_id"], 0)) >= MIN_HISTORY)
             rows = []
-            for market, rungs in ladders.items():
+            for market in sorted(set(ladders) | set(two_way)):
                 pmf = pred.pmf(market)
-                n, price, p, gain, advised = best_line(pmf, rungs,
-                                                       enough and market in ADVISE_MARKETS)
+                b = best_bet(pmf, ladders.get(market, []), two_way.get(market, []),
+                             enough and market in ADVISE_MARKETS)
+                advised = b["advised"]
                 rows.append({
                     "date": ev["kickoff"].date(), "player_1_id": ev["player_1_id"],
                     "player_1": ev["name_1"], "player_2_id": ev["player_2_id"],
-                    "player_2": ev["name_2"], "market": market, "line": n - 0.5,
-                    "surface": ev["surface"], "over_odds": price, "under_odds": None,
-                    "p_over": p, "model_mean": float((pmf * range(len(pmf))).sum()),
-                    "bet": "over" if advised else None, "source": "betano",
+                    "player_2": ev["name_2"], "market": market, "line": b["line"],
+                    "surface": ev["surface"], "over_odds": b["over_odds"],
+                    "under_odds": b["under_odds"], "p_over": b["p_over"],
+                    "model_mean": float((pmf * range(len(pmf))).sum()),
+                    "bet": b["side"] if advised else None, "side": b["side"], "price": b["price"],
+                    "p_side": b["p"], "source": "betano",
                     "event_id": ev["event_id"], "kickoff": ev["kickoff"]})
                 counts["priced"] += 1
                 counts["advised"] += advised
                 if advised or dry_run:
-                    log.info("%s %s v %s  %-6s %d+ @ %.2f  model %.0f%%  EV %+.0f%%%s",
+                    shown = (f"{b['line'] + 0.5:.0f}+" if b["side"] == "over" and b["ladder"]
+                             else f"{b['side']} {b['line']}")
+                    log.info("%s %s v %s  %-6s %s @ %.2f  model %.0f%%  EV %+.0f%%%s",
                              ev["kickoff"].strftime("%d.%m %H:%M"), ev["name_1"], ev["name_2"],
-                             market, n, price, 100 * p, 100 * gain, "  BET" if advised else "")
+                             market, shown, b["price"], 100 * b["p"], 100 * b["ev"],
+                             "  BET" if advised else "")
             if not dry_run:
                 _save_lines(conn, rows)
                 with conn.cursor() as cur:
                     for r in rows:
-                        advice.record(cur, {**ev, "source": "betano"}, r["market"], r["bet"] == "over",
-                                      line=r["line"], side="over", odds=r["over_odds"],
-                                      p_side=r["p_over"], model_mean=r["model_mean"])
+                        advice.record(cur, {**ev, "source": "betano"}, r["market"], r["bet"] is not None,
+                                      line=r["line"], side=r["side"], odds=r["price"],
+                                      p_side=r["p_side"], model_mean=r["model_mean"])
                     advice.share_stakes(cur, ev["match_key"])
                 conn.commit()
     log.info("done: %s", counts)
     return counts
 
 
-def _save_event(conn, ev, fetched_at, ladders, pred, games=()):
+def _save_event(conn, ev, fetched_at, ladders, pred, games=(), two_way=None):
     with conn.cursor() as cur:
         cur.execute("""
             INSERT INTO aces.event (source, event_id, kickoff, league, name_1, name_2,
@@ -187,6 +202,15 @@ def _save_event(conn, ev, fetched_at, ladders, pred, games=()):
                         [(ev["event_id"], fetched_at, m, n, p,
                           model.Prediction.over(pred.pmf(m), n - 0.5) if pred else None)
                          for m, rungs in ladders.items() for n, p in rungs])
+        # Over/under lines, both sides, as Chance's are stored. An over that
+        # duplicates a ladder rung (over 12.5 = 13+) keeps the rung's price.
+        cur.executemany("""
+            INSERT INTO aces.odds (source, event_id, fetched_at, market, at_least, price, side, p_model)
+            VALUES ('betano', %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING""",
+                        [(ev["event_id"], fetched_at, m, math.floor(ln) + 1, price, side,
+                          model.Prediction.over(pred.pmf(m), ln) if pred else None)
+                         for m, lines in (two_way or {}).items() for ln, over, under in lines
+                         for side, price in (("over", over), ("under", under)) if price])
         # Total-games lines, both sides: what the bookmaker expects the
         # match's length to be. Kept for the match-length model.
         cur.executemany("""
@@ -214,7 +238,7 @@ def _save_lines(conn, rows):
                         %(market)s, %(line)s, %(surface)s, %(over_odds)s, %(under_odds)s,
                         %(p_over)s, %(model_mean)s, %(bet)s, %(source)s, %(event_id)s, %(kickoff)s)
                 ON CONFLICT (date, player_1_id, player_2_id, market, line) DO UPDATE SET
-                  over_odds=EXCLUDED.over_odds, p_over=EXCLUDED.p_over,
+                  over_odds=EXCLUDED.over_odds, under_odds=EXCLUDED.under_odds, p_over=EXCLUDED.p_over,
                   model_mean=EXCLUDED.model_mean, bet=EXCLUDED.bet, surface=EXCLUDED.surface,
                   kickoff=EXCLUDED.kickoff, priced_at=now()
                 WHERE aces.line.actual IS NULL AND aces.line.void IS NOT TRUE AND NOT aces.line.placed
