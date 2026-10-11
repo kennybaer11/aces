@@ -239,11 +239,16 @@ class Ratings:
 # MAE 2.33 -> 2.27 and 4.50 -> 4.38; DFs unchanged (4000 was a shade worse).
 VENUE_PRIOR = float(_os.environ.get("ACES_VENUE_PRIOR", 1500))
 VENUE_HALF_LIFE = 730.0      # courts change slowly
-VENUE_STATS = tuple(_os.environ.get("ACES_VENUE_STATS", "ace,spw").split(","))
+# Double faults joined on 11 Oct 2026: from 2025 on, DF log loss 2.0420 ->
+# 2.0167 (ATP) and 2.2054 -> 2.1881 (WTA), and October's overestimate of the
+# match total gone (ATP 5.85 v 4.04 actual -> 4.41; WTA 7.46 v 6.65 -> 6.81).
+# DF rates move with the event (balls, conditions) far more than aces do.
+VENUE_STATS = tuple(_os.environ.get("ACES_VENUE_STATS", "ace,spw,df").split(","))
 
 # The tour's recent level, per stat: a short memory of how far every player
 # has been from their ratings lately. 0 switches it off; the ACES_DRIFT_*
-# variables are for backtests.
+# variables are for backtests. Tried for DFs on 11 Oct 2026 (half-life 21
+# days): less than the court factor, nothing on top of it - left off.
 DRIFT_HALF_LIFE = float(_os.environ.get("ACES_DRIFT_HL", 0))
 DRIFT_PRIOR = float(_os.environ.get("ACES_DRIFT_PRIOR", 2000))
 DRIFT_STATS = tuple(_os.environ.get("ACES_DRIFT_STATS", "df").split(","))
