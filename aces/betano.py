@@ -31,6 +31,7 @@ MARKETS = {"5322": "aces", "5324": "aces:1", "5325": "aces:2",
            "5323": "df", "5326": "df:1", "5327": "df:2"}
 # The same markets as two-way lines, over and under ("Více/Méně než 12.5"):
 # the only way to bet an under at Betano.
+MOST_ACES = "4083"     # "Nejvíce es": player 1, Remíza (draw), player 2
 TWO_WAY = {"X150": "aces", "P1TA": "aces:1", "P2TA": "aces:2",
            "TDBF": "df", "P1DF": "df:1", "P2DF": "df:2"}
 
@@ -134,11 +135,17 @@ def event_ladders(event: dict) -> dict[str, list[tuple[int, float]]]:
 def _ladders(ev: dict) -> dict:
     """Ace and DF ladders, plus "games": the match's total-games lines as
     (line, over, under) - stored for the match-length model, never priced -
-    and "two_way": {market: [(line, over, under)]}, the over/under lines."""
+    and "two_way": {market: [(line, over, under)]}, the over/under lines -
+    and "most_aces": {"1", "x", "2": price}, stored to test, not advised."""
     out = {}
     games, two = {}, {}
     for m in ev.get("markets", []):
         kind = str(m.get("type"))
+        if kind == MOST_ACES:
+            sel = [s for s in m.get("selections", []) if s.get("price")]
+            if len(sel) == 3:     # listed player 1, draw, player 2
+                out["most_aces"] = {k: float(s["price"]) for k, s in zip(("1", "x", "2"), sel)}
+            continue
         if kind == "FTGO" or kind in TWO_WAY:               # "Gamy", or an over/under line
             into = games if kind == "FTGO" else two.setdefault(TWO_WAY[kind], {})
             for s in m.get("selections", []):

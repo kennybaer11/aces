@@ -130,14 +130,17 @@ def run(conn, dry_run: bool, advise: bool):
             ladders = betano.event_ladders(ev)
             games = ladders.pop("games", [])       # for the length model, not priced
             two_way = ladders.pop("two_way", {})    # over/under lines: the unders
+            most = ladders.pop("most_aces", None)   # stored with the model's chance, not advised
             known = bool(T and ev["player_1_id"] and ev["player_2_id"])
             pred = None
-            if known and ladders:
+            if known and (ladders or two_way or most):
                 pred = model.predict(T["ratings"], ev["player_1_id"], ev["player_2_id"], ev["surface"],
                                      model._days(ev["kickoff"]), tour=ev["tour"], level=ev["level"],
                                      venue=T["venues"].key(ev["league"]))
             if not dry_run:
                 _save_event(conn, ev, fetched_at, ladders, pred, games, two_way)
+                if most and known:
+                    _save_most_aces(conn, ev, fetched_at, most, pred)
             if not known:
                 counts["unmatched"] += 1
                 log.info("no %s history for %s / %s", ev["tour"], ev["name_1"], ev["name_2"])
@@ -219,6 +222,21 @@ def _save_event(conn, ev, fetched_at, ladders, pred, games=(), two_way=None):
                         [(ev["event_id"], fetched_at, math.floor(ln) + 1, price, side)
                          for ln, over, under in games
                          for side, price in (("over", over), ("under", under)) if price])
+
+
+def _save_most_aces(conn, ev, fetched_at, prices, pred):
+    """Betano's "Nejvíce es" with the model's chance of each outcome (side 1,
+    x, 2), to be compared on settled matches before any of it is advised."""
+    if pred is None:
+        p = {}
+    else:
+        p = model.most_aces(pred, ev["tour"])
+    with conn.cursor() as cur:
+        cur.executemany("""
+            INSERT INTO aces.odds (source, event_id, fetched_at, market, at_least, price, side, p_model)
+            VALUES ('betano', %s, %s, 'most_aces', 0, %s, %s, %s) ON CONFLICT DO NOTHING""",
+                        [(ev["event_id"], fetched_at, price, side, p.get(side))
+                         for side, price in prices.items()])
 
 
 def _save_lines(conn, rows):

@@ -322,6 +322,24 @@ def best_of(tour: str, level: str | None, draw: str | None = "M") -> int:
     return 5 if tour == "ATP" and level == "Grand Slam" and draw != "Q" else 3
 
 
+# "Most aces" (player 1 / draw / player 2): the two forecasts as independent
+# counts, sharpened by this power. Fitted walk-forward on 2025-26
+# (most_aces_bt.py): ATP 1.1 (log loss 0.7614 -> 0.7594; independent counts
+# understate the favourite, since both share the match's length), WTA 1.0.
+MOST_ACES_POWER = {"ATP": 1.1, "WTA": 1.0}
+
+
+def most_aces(pred, tour: str) -> dict:
+    """{"1": P(player 1 serves more aces), "x": P(same), "2": P(player 2 more)}."""
+    n = min(len(pred.ace_a), len(pred.ace_b))
+    pa, pb = pred.ace_a[:n], pred.ace_b[:n]
+    cb = np.cumsum(pb)
+    win, draw = float((pa[1:] * cb[:-1]).sum()), float((pa * pb).sum())
+    p = np.clip(np.array([win, draw, 1 - win - draw]), 1e-9, 1) ** MOST_ACES_POWER.get(tour, 1.0)
+    p = p / p.sum()
+    return {"1": float(p[0]), "x": float(p[1]), "2": float(p[2])}
+
+
 def predict(r: Ratings, a: str, b: str, surface: str, t: float,
             shape: dict | None = None, tour: str = "WTA", level: str | None = None,
             draw: str | None = "M", venue: str | None = None) -> Prediction:
