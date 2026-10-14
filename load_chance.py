@@ -28,6 +28,7 @@ MIN_P = 0.30          # never advise a side the model gives less than this
 MAX_EDGE = 0.50       # nor one with more value than this: see odds.py
 ADVISE_MARKETS = {"aces", "aces:1", "aces:2"}
 VALIDATED_TOURS = {"WTA", "ATP"}   # see odds.py
+UNDER_TOURS = {"WTA"}              # see odds.py: ATP unders paused 14 Oct 2026
 SURFACES = {"tvrdý p.": "Hard", "antuka": "Clay", "tráva": "Grass", "koberec": "Hard"}
 
 
@@ -136,7 +137,8 @@ def main():
                 # those with EDGE to MAX_EDGE of value and a model chance of at least MIN_P.
                 sides = [(model.kelly_growth(pr, prices[sd]), sd, pr) for sd, pr, e in
                          (("over", p, ev_over), ("under", 1 - p, ev_under))
-                         if e is not None and EDGE <= e <= MAX_EDGE and pr >= MIN_P]
+                         if e is not None and EDGE <= e <= MAX_EDGE and pr >= MIN_P
+                         and (sd == "over" or ev["tour"] in UNDER_TOURS)]
                 pick = max(sides) if sides and args.advise and enough and mk in ADVISE_MARKETS else None
                 if pick and (mk not in best or pick[0] > best[mk][0]):
                     best[mk] = (pick[0], pick[1], pick[2], line, prices[pick[1]])

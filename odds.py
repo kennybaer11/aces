@@ -63,6 +63,11 @@ def surface_for(conn, ev: dict) -> str:
     return "Hard"
 
 
+# Unders are advised only for these tours. Paused for ATP on 14 Oct 2026:
+# in Shanghai the model expected 14.8 aces a match against 17.0 played (and
+# Betano's 16.6 line), and its ATP unders won 11 of 28 against 18.9 expected.
+# The court factor learns a new edition too slowly; back on once that is fixed.
+UNDER_TOURS = {"WTA"}
 MIN_P = 0.30         # never advise a rung the model gives less than this
 # Never advise above this either. An edge that large against a bookmaker
 # almost always means the model is missing something - on 3 Oct 2026 Kraus's
@@ -71,7 +76,8 @@ MIN_P = 0.30         # never advise a rung the model gives less than this
 MAX_EDGE = 0.50
 
 
-def best_bet(pmf, rungs: list[tuple[int, float]], two_way: list, can_advise: bool) -> dict:
+def best_bet(pmf, rungs: list[tuple[int, float]], two_way: list, can_advise: bool,
+             unders: bool = True) -> dict:
     """The line this market is shown at, from the ladder's over rungs and the
     two-way over/under lines together. Advised: of the sides the model gives
     at least MIN_P and EDGE to MAX_EDGE of value, the one with the best Kelly
@@ -92,7 +98,8 @@ def best_bet(pmf, rungs: list[tuple[int, float]], two_way: list, can_advise: boo
                               "over_odds": over, "under_odds": under, "ladder": False})
     for c in cands:
         c["ev"] = c["p"] * c["price"] - 1
-    ok = [c for c in cands if c["p"] >= MIN_P and EDGE <= c["ev"] <= MAX_EDGE]
+    ok = [c for c in cands if c["p"] >= MIN_P and EDGE <= c["ev"] <= MAX_EDGE
+          and (unders or c["side"] == "over")]
     if can_advise and ok:
         return {**max(ok, key=lambda c: model.kelly_growth(c["p"], c["price"])), "advised": True}
     pool = [c for c in cands if c["ladder"]] or cands
@@ -154,7 +161,7 @@ def run(conn, dry_run: bool, advise: bool):
             for market in sorted(set(ladders) | set(two_way)):
                 pmf = pred.pmf(market)
                 b = best_bet(pmf, ladders.get(market, []), two_way.get(market, []),
-                             enough and market in ADVISE_MARKETS)
+                             enough and market in ADVISE_MARKETS, ev["tour"] in UNDER_TOURS)
                 advised = b["advised"]
                 rows.append({
                     "date": ev["kickoff"].date(), "player_1_id": ev["player_1_id"],
