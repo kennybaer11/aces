@@ -38,7 +38,7 @@
   };
   walk(sports, []);
   // Tour-level events by city (Chance's Czech names), and the Slams.
-  const TOUR = /^(ATP|WTA) (Peking|Tokyo|Šanghaj|Shanghai|Wuhan|Ningbo|Almaty|Stockholm|Antverpy|Antwerpen|Basilej|Vídeň|Paříž|Turín|Osaka|Hongkong|Guangzhou|Tokio|Soul|Rijád|Dauhá|Dubaj|Indian Wells|Miami|Madrid|Řím|Cincinnati|Montreal|Toronto|Washington|Halle|Queen's|Brisbane|Adelaide|Auckland|Acapulco|Rotterdam|Barcelona|Mnichov|Hamburk|Kitzbühel|Gstaad|Umag|Los Cabos|Atlanta|Winston-Salem|Eastbourne|Mallorca|Stuttgart|Berlín|Bad Homburg|Charleston|Linec|Ostrava|Praha|Rovereto)|Australian|Roland|Wimbledon|US Open/i;
+  const TOUR = /^(ATP|WTA) (Peking|Tokyo|Šanghaj|Shanghai|Wuhan|Ningbo|Almaty|Stockholm|Antverpy|Antwerpen|Basilej|Vídeň|Paříž|Turín|Osaka|Hongkong|Guangzhou|Tokio|Soul|Rijád|Dauhá|Dubaj|Indian Wells|Miami|Madrid|Řím|Cincinnati|Montreal|Toronto|Washington|Halle|Queen's|Brisbane|Adelaide|Auckland|Acapulco|Rotterdam|Barcelona|Mnichov|Hamburk|Kitzbühel|Gstaad|Umag|Los Cabos|Atlanta|Winston-Salem|Eastbourne|Mallorca|Stuttgart|Berlín|Bad Homburg|Charleston|Linec|Ostrava|Praha|Rovereto|Brusel|Lyon)|Australian|Roland|Wimbledon|US Open/i;
   const want = comps.filter(c => TOUR.test(c.name) && !/4hra/.test(c.name));
   C.comps = want.map(c => c.name);
   for (const c of want) {
