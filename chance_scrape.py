@@ -199,6 +199,12 @@ def parse_market(text):
                     for (b, line), p in rungs.items()]
 
 
+# Prices are read again when the match is near, and otherwise only when what
+# we hold has gone stale: Chance moves its ace lines little until the day.
+RECHECK_HOURS = 6
+NEAR_KICKOFF_HOURS = 4
+
+
 def fresh_already(conn, event_id, kickoff, now):
     """True when we already hold lines for this match and need not pay again."""
     if not event_id or (kickoff - now) <= timedelta(hours=NEAR_KICKOFF_HOURS):
