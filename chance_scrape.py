@@ -166,7 +166,18 @@ def competition(title):
 
 
 def parse_market(text):
-    """One market element's text -> (market, [(box, line, over, under)])."""
+    """One market element's text -> (market, [(box, line, over, under)]).
+
+    The text arrives glued together, with each player's name standing in front
+    of their own rungs:
+
+      "Počet es hráče v zápasuJacquetMéně než 10.51.95Více než 10.51.75
+       Bran.NakashimaMéně než 11.51.95Více než 11.51.75"
+
+    so whatever sits between two rungs names the player the next ones belong
+    to. Keeping that straight is the whole job: both players' lines otherwise
+    collapse into one and the first is lost.
+    """
     if not text:
         return None, []
     low = text.lower()
@@ -175,35 +186,17 @@ def parse_market(text):
         return None, []
     market = MARKETS[key]
     body = text[len(key):]
-    out, box = [], ""
-    pos = 0
-    pending = {}
+    rungs, box, pos = {}, "", 0
     for m in RUNG.finditer(body):
-        # Whatever stands between the last rung and this one names the player
-        # the following rungs belong to ("Jacquet", "Bran.Nakashima").
         label = body[pos:m.start()].strip()
         if label:
-            if pending:
-                out.append((box, *pending.popitem()[1]))
             box = label
         pos = m.end()
-        line = float(m.group(2))
-        price = float(m.group(3))
         side = "over" if m.group(1) == "Více" else "under"
-        cur = pending.setdefault(line, {"line": line})
-        cur[side] = price
-    rows = []
-    for line, cur in pending.items():
-        rows.append((box, line, cur.get("over"), cur.get("under")))
-    # markets with one player per box keep their own box name
-    return market, [(box if market.endswith(":p") else "", ln, o, u)
-                    for (box, ln, o, u) in rows] if rows else []
-
-
-# Prices are read again when the match is near, and otherwise only when what
-# we hold has gone stale. Chance moves its ace lines little until the day.
-RECHECK_HOURS = 6
-NEAR_KICKOFF_HOURS = 4
+        rungs.setdefault((box, float(m.group(2))), {})[side] = float(m.group(3))
+    per_player = market.endswith(":p")
+    return market, [(b if per_player else "", line, p.get("over"), p.get("under"))
+                    for (b, line), p in rungs.items()]
 
 
 def fresh_already(conn, event_id, kickoff, now):
