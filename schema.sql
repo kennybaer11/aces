@@ -236,3 +236,9 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$ LANGUAGE plpgsql;
+
+-- What Telegram was last told about a tip (notify.py). Not part of the tip, so
+-- the lock above leaves these alone: a tip settles long after the message.
+ALTER TABLE aces.advice ADD COLUMN IF NOT EXISTS told_side   TEXT;
+ALTER TABLE aces.advice ADD COLUMN IF NOT EXISTS told_rating SMALLINT;
+ALTER TABLE aces.advice ADD COLUMN IF NOT EXISTS told_at     TIMESTAMPTZ;
