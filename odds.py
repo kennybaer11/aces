@@ -98,10 +98,12 @@ def best_bet(pmf, rungs: list[tuple[int, float]], two_way: list, can_advise: boo
                               "over_odds": over, "under_odds": under, "ladder": False})
     for c in cands:
         c["ev"] = c["p"] * c["price"] - 1
-    ok = [c for c in cands if c["p"] >= MIN_P and EDGE <= c["ev"] <= MAX_EDGE
+        c["pj"] = model.judged(c["p"], c["price"])        # what the rules look at
+        c["evj"] = c["pj"] * c["price"] - 1
+    ok = [c for c in cands if c["pj"] >= MIN_P and EDGE <= c["evj"] and c["ev"] <= MAX_EDGE
           and (unders or c["side"] == "over")]
     if can_advise and ok:
-        return {**max(ok, key=lambda c: model.kelly_growth(c["p"], c["price"])), "advised": True}
+        return {**max(ok, key=lambda c: model.kelly_growth(c["pj"], c["price"])), "advised": True}
     pool = [c for c in cands if c["ladder"]] or cands
     return {**min(pool, key=lambda c: abs(c["price"] - 2.0)), "advised": False}
 

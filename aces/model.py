@@ -306,6 +306,22 @@ class Prediction:
 LENGTH = {("WTA", 3): sim.LENGTH, ("ATP", 3): 0.932, ("ATP", 5): 0.896}
 
 
+# Tips are judged on the model's chance mixed with the bookmaker's: where
+# the two disagree a little, the bookmaker is usually right. Adopted 25 Oct
+# 2026 on the settled record: 173 tips, +9.5 units (+5.5%) on the model alone;
+# with this mix and the same +10% bar, 128 of them, +25.2 units (+20%). The
+# tips with only 10-15% value had lost 12.7 units. (Chosen on the same
+# record, so the true gain is smaller.) The bookmaker's chance is 1/odds less
+# a typical 6% margin.
+MODEL_WEIGHT = 0.75
+BOOK_MARGIN = 1.06
+
+
+def judged(p: float, odds: float) -> float:
+    """The chance a tip is judged on: the model's, mixed with the bookmaker's."""
+    return MODEL_WEIGHT * p + (1 - MODEL_WEIGHT) / (odds * BOOK_MARGIN)
+
+
 def kelly_growth(p: float, odds: float) -> float:
     """Expected log growth of a bankroll staking the Kelly fraction on a bet
     won with probability p at decimal odds - 0 when there is no edge.

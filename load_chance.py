@@ -135,9 +135,12 @@ def main():
                 ev_under = (1 - p) * prices["under"] - 1 if "under" in prices else None
                 # Same rule as odds.py: the side with the best Kelly growth among
                 # those with EDGE to MAX_EDGE of value and a model chance of at least MIN_P.
-                sides = [(model.kelly_growth(pr, prices[sd]), sd, pr) for sd, pr, e in
-                         (("over", p, ev_over), ("under", 1 - p, ev_under))
-                         if e is not None and EDGE <= e <= MAX_EDGE and pr >= MIN_P
+                # Judged on the model's chance mixed with Chance's (model.judged).
+                sides = [(model.kelly_growth(model.judged(pr, prices[sd]), prices[sd]), sd, pr)
+                         for sd, pr, e in (("over", p, ev_over), ("under", 1 - p, ev_under))
+                         if e is not None and e <= MAX_EDGE
+                         and model.judged(pr, prices[sd]) * prices[sd] - 1 >= EDGE
+                         and model.judged(pr, prices[sd]) >= MIN_P
                          and (sd == "over" or ev["tour"] in UNDER_TOURS)]
                 pick = max(sides) if sides and args.advise and enough and mk in ADVISE_MARKETS else None
                 if pick and (mk not in best or pick[0] > best[mk][0]):
