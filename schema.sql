@@ -242,3 +242,7 @@ END $$ LANGUAGE plpgsql;
 ALTER TABLE aces.advice ADD COLUMN IF NOT EXISTS told_side   TEXT;
 ALTER TABLE aces.advice ADD COLUMN IF NOT EXISTS told_rating SMALLINT;
 ALTER TABLE aces.advice ADD COLUMN IF NOT EXISTS told_at     TIMESTAMPTZ;
+
+-- Why a tip was voided: 'retired' (walkover or retirement) or 'no result'
+-- (a WTA match with no stats five days on).
+ALTER TABLE aces.advice ADD COLUMN IF NOT EXISTS void_reason TEXT;

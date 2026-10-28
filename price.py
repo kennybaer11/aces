@@ -182,6 +182,7 @@ def settle(conn):
            WHERE a.actual IS NULL AND a.void IS NOT TRUE AND a.kickoff < now())
         UPDATE aces.advice a SET
           void = NOT m.completed, settled_at = now(),
+          void_reason = CASE WHEN NOT m.completed THEN 'retired' END,
           actual = CASE WHEN NOT m.completed THEN NULL
                         WHEN a.market = 'aces'   THEN m.a1 + m.a2
                         WHEN a.market = 'aces:1' THEN m.a1
@@ -189,6 +190,15 @@ def settle(conn):
           FROM m
          WHERE m.rn = 1 AND (a.source, a.event_id, a.market) = (m.source, m.event_id, m.market)""")
         n_advice = cur.rowcount
+        # A WTA tip whose match never shows up with stats - the WTA feed has
+        # none for some 125 events, or the match never took place - is closed
+        # as void after five days rather than left open for ever. ATP results
+        # are loaded by hand from tennistourdata, so those wait.
+        cur.execute("""
+            UPDATE aces.advice SET void = true, void_reason = 'no result', settled_at = now()
+             WHERE actual IS NULL AND void IS NOT TRUE AND tour = 'WTA'
+               AND kickoff < now() - interval '5 days'""")
+        n_advice += cur.rowcount
         cur.execute("""
         SELECT count(*) FILTER (WHERE bet IS NOT NULL),
                count(*) FILTER (WHERE bet = 'over'  AND actual > line OR bet = 'under' AND actual < line),
