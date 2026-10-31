@@ -110,7 +110,10 @@ def best_bet(pmf, rungs: list[tuple[int, float]], two_way: list, can_advise: boo
 
 # Tours whose model has passed a walk-forward backtest. Lines of other tours
 # are priced and stored - for the comparison page - but never advised.
-VALIDATED_TOURS = {"WTA", "ATP"}   # ATP passed its walk-forward backtest 2024-26; on since 2026-10-02
+# ATP paused 1 Nov 2026: the court factor learns a tournament's current
+# edition too slowly - Shanghai played fast (men's unders 11 of 28) and Vienna
+# slow (men's overs 6 of 26, -10.9 units). Back on once the edition factor is in.
+VALIDATED_TOURS = {"WTA"}
 
 
 def run(conn, dry_run: bool, advise: bool):

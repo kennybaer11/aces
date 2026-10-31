@@ -27,7 +27,7 @@ EDGE = 0.10           # tails run ~1 point optimistic (tail_check), so a higher 
 MIN_P = 0.30          # never advise a side the model gives less than this
 MAX_EDGE = 0.50       # nor one with more value than this: see odds.py
 ADVISE_MARKETS = {"aces", "aces:1", "aces:2"}
-VALIDATED_TOURS = {"WTA", "ATP"}   # see odds.py
+VALIDATED_TOURS = {"WTA"}             # see odds.py: ATP paused 1 Nov 2026
 UNDER_TOURS = {"WTA"}              # see odds.py: ATP unders paused 14 Oct 2026
 SURFACES = {"tvrdý p.": "Hard", "antuka": "Clay", "tráva": "Grass", "koberec": "Hard"}
 
