@@ -25,8 +25,15 @@ def _words(s: str) -> str:
 
 
 def city(league: str) -> str:
-    """'WTA - Peking (Ž)' -> 'beijing', 'ATP Shanghai - tvrdý p.' -> 'shanghai'."""
-    s = _words(league)
+    """'WTA - Peking (Ž)' -> 'beijing', 'ATP Shanghai - tvrdý p.' -> 'shanghai',
+    'WTA Guangzhou - tvrdý p. - K.Quevedo-Tagger' -> 'guangzhou'.
+
+    Betano puts the tour first ('WTA - Peking'); Chance puts the city with the
+    tour and may add the surface and the match after it - only the part that
+    names the city is read, or the players' names would spoil the match."""
+    parts = [p.strip() for p in league.split(" - ")]
+    head = parts[1] if parts[0] in ("ATP", "WTA") and len(parts) > 1 else parts[0]
+    s = _words(head)
     return CZECH.get(s, s)
 
 
