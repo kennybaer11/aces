@@ -28,6 +28,7 @@ from scipy import stats
 
 from . import sim
 
+import datetime as _dt
 import os as _os
 # How fast old matches fade. ACES_HALF_LIFE overrides it for backtests only.
 HALF_LIFE_DAYS = float(_os.environ.get("ACES_HALF_LIFE", 365))
@@ -161,6 +162,7 @@ class Ratings:
     matches: dict = field(default_factory=dict)     # player -> decayed match count
     venue: dict = field(default_factory=dict)       # (stat, venue) -> _Acc: court speed
     drift: dict = field(default_factory=dict)       # stat -> _Acc: the tour's recent level
+    edition: dict = field(default_factory=dict)     # (stat, venue, year) -> _Acc: this year's court
 
     def _b(self, stat, surface):
         return self.base.setdefault((stat, surface), _Base()).rate(DEFAULTS[stat])
@@ -171,6 +173,15 @@ class Ratings:
             return 1.0
         acc = self.venue.setdefault((stat, venue), _Acc(half_life=VENUE_HALF_LIFE))
         return acc.ratio(t, VENUE_PRIOR, self._b(stat, "Hard"))
+
+    def _e(self, stat, venue, t) -> float:
+        """This year's edition of the tournament against its history: a court
+        relaid, new balls, the weather - what the first rounds show."""
+        if not (EDITION_PRIOR and venue and stat in VENUE_STATS):
+            return 1.0
+        key = (stat, venue, _year(t))
+        acc = self.edition.setdefault(key, _Acc(half_life=EDITION_HALF_LIFE))
+        return acc.ratio(t, EDITION_PRIOR, self._b(stat, "Hard"))
 
     def _d(self, stat, t) -> float:
         """The tour's recent level on a stat against what the ratings expect:
@@ -187,7 +198,7 @@ class Ratings:
         surf = self.srv_surf.setdefault((stat, server, surface), _Acc()).ratio(
             t, SURFACE_PRIOR, b, toward=overall)
         opp = self.ret.setdefault((stat, returner), _Acc()).ratio(t, PRIOR_RET[stat], b)
-        v = self._v(stat, venue, t) * self._d(stat, t)
+        v = self._v(stat, venue, t) * self._e(stat, venue, t) * self._d(stat, t)
         if stat == "spw":
             # Near a base of 0.56 the factors stay within about +-20%, so the
             # product stays a probability; the clip is a guard, not a model.
@@ -212,15 +223,18 @@ class Ratings:
                 # credited with, so a player who plays fast events is not
                 # rated a bigger server for it - and the court is credited
                 # with what the players would not have done elsewhere.
-                vf, d = self._v(stat, venue, t), self._d(stat, t)
-                v = vf * d
+                vf, ve, d = self._v(stat, venue, t), self._e(stat, venue, t), self._d(stat, t)
+                v = vf * ve * d
                 accs = [(self.srv[(stat, server)], b * opp * v * n),
                         (self.srv_surf[(stat, server, row["surface"])], b * opp * v * n),
                         (self.ret[(stat, returner)], b * srvr * v * n)]
                 if VENUE_PRIOR and venue and stat in VENUE_STATS:
                     accs.append((self.venue[(stat, venue)], b * surf * opp * d * n))
+                if EDITION_PRIOR and venue and stat in VENUE_STATS:
+                    # Against the venue's history: this edition's own deviation.
+                    accs.append((self.edition[(stat, venue, _year(t))], b * surf * opp * vf * d * n))
                 if DRIFT_HALF_LIFE and stat in DRIFT_STATS:
-                    accs.append((self.drift[stat], b * surf * opp * vf * n))
+                    accs.append((self.drift[stat], b * surf * opp * vf * ve * n))
                 for acc, expected in accs:
                     acc.decay_to(t)
                     acc.act += k
@@ -252,6 +266,23 @@ VENUE_STATS = tuple(_os.environ.get("ACES_VENUE_STATS", "ace,spw,df").split(",")
 DRIFT_HALF_LIFE = float(_os.environ.get("ACES_DRIFT_HL", 0))
 DRIFT_PRIOR = float(_os.environ.get("ACES_DRIFT_PRIOR", 2000))
 DRIFT_STATS = tuple(_os.environ.get("ACES_DRIFT_STATS", "df").split(","))
+
+
+# This year's edition of a tournament, on top of the venue's history: in
+# Shanghai 2026 the model expected 14.8 aces a match against 17.0 played - the
+# venue factor, built over years, learns a quicker court too slowly. Pseudo
+# serve points pull the edition's factor to 1 (a match is about 150); 0 is off.
+# ACES_EDITION_PRIOR overrides it for backtests. Adopted 1 Nov 2026 at 3000,
+# the best of 300/1000/3000: from 2025, ace log loss 1.8131 -> 1.8107 (WTA)
+# and 2.5413 -> 2.5364 (ATP), DFs a shade better too. On the men's autumn it
+# closes part of the gap, not all: Shanghai 14.2 predicted v 16.1 played ->
+# 14.8; Vienna/Basel 15.4 v 14.4 -> 14.9.
+EDITION_PRIOR = float(_os.environ.get("ACES_EDITION_PRIOR", 3000))
+EDITION_HALF_LIFE = 60.0
+
+
+def _year(t: float) -> int:
+    return _dt.datetime.fromtimestamp(t * 86400, _dt.timezone.utc).year
 
 
 def venue_key(row) -> str | None:

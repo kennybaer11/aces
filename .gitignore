@@ -19,3 +19,6 @@ df_runs.sh
 bt_df_*
 bt_recent_*
 bt_most_*
+edition_runs.sh
+bt_ed_*
+edition_runs2.sh
