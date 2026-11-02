@@ -38,15 +38,26 @@ SLAM_SURFACE = {"Australian Open": "Hard", "Roland Garros": "Clay",
                 "Wimbledon": "Grass", "US Open": "Hard"}
 
 
-def surface_for(conn, ev: dict) -> str:
+def surface_for(conn, ev: dict, venue: str | None = None) -> str:
     """The surface of the event the players are in this week.
 
-    Betano does not say, so it is read from the tour's own data: the
-    tournament either player last played in the fortnight before kickoff.
+    Betano does not say. The tournament's own surface comes first, from its
+    latest edition in the tour's data (venue is "tour:tournament_id"); only a
+    tournament with no history falls back on the event either player last
+    played in the fortnight before kickoff - which on 2 Nov 2026 called Cali's
+    clay hard for two players arriving from hard courts.
     """
     for slam, surf in SLAM_SURFACE.items():
         if ev["league"].startswith(slam):
             return surf
+    if venue:
+        tour, _, tid = venue.partition(":")
+        with conn.cursor() as cur:
+            cur.execute("""SELECT surface FROM aces.tournament WHERE tour = %s AND tournament_id = %s
+                            ORDER BY year DESC LIMIT 1""", (tour, tid))
+            row = cur.fetchone()
+        if row and row[0]:
+            return "Hard" if row[0] == "Carpet" else row[0]
     ids = [i for i in (ev["player_1_id"], ev["player_2_id"]) if i]
     if ids:
         with conn.cursor() as cur:
@@ -136,7 +147,7 @@ def run(conn, dry_run: bool, advise: bool):
             P = T["players"] if T else None
             ev["player_1_id"] = P.by_full_name(ev["name_1"]) if P else None
             ev["player_2_id"] = P.by_full_name(ev["name_2"]) if P else None
-            ev["surface"] = surface_for(conn, ev)
+            ev["surface"] = surface_for(conn, ev, T["venues"].key(ev["league"]) if T else None)
             ev["match_key"] = events.match_key(ev["kickoff"], ev["name_1"], ev["name_2"],
                                                ev["player_1_id"], ev["player_2_id"])
             ladders = betano.event_ladders(ev)
