@@ -23,7 +23,11 @@ from dotenv import load_dotenv
 from aces import advice, db, events, model, venues
 from aces.players import Players, norm
 
-EDGE = 0.10           # tails run ~1 point optimistic (tail_check), so a higher bar than 5%
+# Chance on probation from 7 Nov 2026: +15%, not odds.py's +10%. Its tips
+# collected on the server (22 Oct on) won 9 of 39 (-17.4 units), mostly priced
+# without the court factor (venues bug, fixed 31 Oct) and half of them men's.
+# Back to 0.10 if ~30 women's tips after the fix hold up; drop Chance if not.
+EDGE = 0.15
 MIN_P = 0.30          # never advise a side the model gives less than this
 MAX_EDGE = 0.50       # nor one with more value than this: see odds.py
 ADVISE_MARKETS = {"aces", "aces:1", "aces:2"}
