@@ -172,7 +172,8 @@ def run(conn, dry_run: bool, advise: bool):
                 continue
             enough = (advise and ev["tour"] in VALIDATED_TOURS
                       and min(T["seen"].get(ev["player_1_id"], 0),
-                              T["seen"].get(ev["player_2_id"], 0)) >= MIN_HISTORY)
+                              T["seen"].get(ev["player_2_id"], 0)) >= MIN_HISTORY
+                      and T["venues"].in_season(ev["league"], ev["kickoff"]))
             rows = []
             for market in sorted(set(ladders) | set(two_way)):
                 pmf = pred.pmf(market)

@@ -123,7 +123,8 @@ def main():
                 continue
             s = seen[ev["tour"]]
             enough = (ev["tour"] in VALIDATED_TOURS
-                      and min(s.get(ev["player_1_id"], 0), s.get(ev["player_2_id"], 0)) >= 10)
+                      and min(s.get(ev["player_1_id"], 0), s.get(ev["player_2_id"], 0)) >= 10
+                      and V[ev["tour"]].in_season(ev["league"], ev["kickoff"]))
             # Chance can quote several lines in one market (aces 8.5, 9.5, ...):
             # each is priced and stored, and the market's advice is the best of
             # them by Kelly growth - one record per market, as on Betano.
