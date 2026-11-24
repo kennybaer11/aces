@@ -19,6 +19,7 @@ send is retried on the next run rather than lost.
 import argparse
 import html
 import logging
+import math
 import os
 import sys
 from zoneinfo import ZoneInfo
@@ -57,6 +58,14 @@ def market_name(market):
     return label, who
 
 
+def floor_odds(r) -> float | None:
+    """The lowest odds at which the tip still has value: 1 / its chance,
+    rounded up. Betano's price often drops after a tip; above this the bet is
+    still worth placing, below it skip it."""
+    p = float(r["p_model"] or 0)
+    return math.ceil(100 / p) / 100 if p > 0 else None
+
+
 def describe(r, changed=False):
     e = html.escape
     start = r["kickoff"].astimezone(PRAGUE)
@@ -71,6 +80,9 @@ def describe(r, changed=False):
         if not side:
             return "no bet"
         out = f"<b>{side.upper()}</b> {shown} @ {float(r['odds']):.2f}"
+        low = floor_odds(r) if side == r["side"] else None
+        if low and low < float(r["odds"]):
+            out += f" (down to {low:.2f})"
         if rating:
             out += f" · stake {rating}/10"
         return out
@@ -126,7 +138,8 @@ def build(rows, changed=False):
         header = (f"🎾 <b>New tennis tips</b> - {len(rows)} tip"
                   f"{'' if len(rows) == 1 else 's'}")
         footer = ("\n\n<i>Aces only, at +10% value or more against the model. Stakes stay "
-                  f"capped while the record is short.</i>\n<a href=\"{SITE}\">Tennis tips</a>")
+                  f"capped while the record is short. \"Down to\" is the lowest price still "
+                  f"worth taking if the odds drop.</i>\n<a href=\"{SITE}\">Tennis tips</a>")
     messages, current = [], header
     for r in rows:
         block = "\n\n" + describe(r, changed)

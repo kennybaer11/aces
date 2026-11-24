@@ -4,9 +4,9 @@
 Betano refuses the posession server (HTTP 403 since about 7 Nov 2026), so
 its run_aces.sh still collects results and settles, but the odds that
 betken.cz's Tennis page shows are fetched here: store every rung, price,
-write tips (odds.py --advise). Telegram is not sent from here.
+write tips (odds.py --advise), then tell Telegram (notify.py).
 
-The Windows scheduled task "aces Betano odds" runs this every three hours
+The Windows scheduled task "aces Betano odds" runs this every 30 minutes
 with .venv\\Scripts\\pythonw.exe, which opens no window, at normal priority
 (4): at the scheduler's default (7, below normal) its runs sat at process
 start for hours, from 19 Nov 2026 21:50 on, and blocked every later one. A
@@ -58,5 +58,20 @@ with open(HERE / "betano_local.log", "a", encoding="utf-8", buffering=1) as log:
             break
         print(f"== {stamp()} exit {code}, retrying in 60 s")
         time.sleep(60)
+    # Telegram from here too, so a tip goes out within this run's half hour,
+    # not at the server's next three-hourly run. notify.py marks what it sent,
+    # so the server does not send it again.
+    if code == 0:
+        try:
+            from dotenv import dotenv_values
+            env = dotenv_values(r"C:\Users\kenny\posession\scraper\.env")
+            for k in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+                if env.get(k):
+                    os.environ[k] = env[k]
+            import notify
+            sys.argv = ["notify.py"]
+            notify.main()
+        except BaseException as e:
+            print(f"== {stamp()} notify failed: {type(e).__name__}: {e}")
     print(f"== {stamp()} exit {code}")
 sys.exit(code)
