@@ -100,7 +100,8 @@ def describe(r, changed=False):
         f"{e(about) + ' ' if about else ''}{label}",
     ]
     if changed:
-        out.append(f"{tip(r['told_side'], r['told_rating'])} → {tip(r['side'], r['rating'])}")
+        out.append(f"{tip(r['told_side'], r['told_rating'])} → {tip(r['side'], r['rating'])} · "
+                   f"{BOOKS.get(r['source'], r['source'])}")
     else:
         out.append(f"{tip(r['side'], r['rating'])} · edge {float(r['edge']):+.1%} · "
                    f"{BOOKS.get(r['source'], r['source'])}")
