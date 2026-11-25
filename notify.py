@@ -61,9 +61,16 @@ def market_name(market):
 def floor_odds(r) -> float | None:
     """The lowest odds at which the tip still has value: 1 / its chance,
     rounded up. Betano's price often drops after a tip; above this the bet is
-    still worth placing, below it skip it."""
+    still worth placing, below it skip it.
+
+    The chance is the judged one (model.judged, at the odds tipped), not the
+    model's own: on the settled tips today's rules would give, the model
+    expected 76.5 wins of 146 and they won 69, the judged chance 71.5."""
+    from aces import model
     p = float(r["p_model"] or 0)
-    return math.ceil(100 / p) / 100 if p > 0 else None
+    if p <= 0 or not r.get("odds"):
+        return None
+    return math.ceil(100 / model.judged(p, float(r["odds"]))) / 100
 
 
 def describe(r, changed=False):
