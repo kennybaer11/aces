@@ -6,7 +6,8 @@ While the match is still to start, an advised market is written (or
 rewritten) with backed = true, and a market that was advised but no longer is
 keeps its last advice with backed = false: withdrawn, not forgotten. From
 kickoff nothing here can change it - the WHERE below, and behind it the
-aces.advice_locked trigger in the database.
+aces.advice_locked trigger in the database. Nor once Telegram has announced it
+(told_at): the announcement is the bet, sent once and never revised.
 """
 
 import os
@@ -54,7 +55,8 @@ def share_stakes(cur, match_key: str):
     alone, shared in proportion. Placed tips keep the rating they were placed
     at and use up their part of it; only open, unplaced tips are adjusted."""
     cur.execute("""
-        SELECT a.source, a.event_id, a.market, a.p_model::float, a.odds::float, a.placed, a.rating
+        SELECT a.source, a.event_id, a.market, a.p_model::float, a.odds::float,
+               a.placed OR a.told_at IS NOT NULL, a.rating
           FROM aces.advice a JOIN aces.event e USING (source, event_id)
          WHERE e.match_key = %s AND a.backed AND a.kickoff > now()""", (match_key,))
     tips = cur.fetchall()
@@ -70,7 +72,7 @@ def share_stakes(cur, match_key: str):
         rating = max(1, round(own[k] * min(1.0, room / want))) if want else 1
         cur.execute("""UPDATE aces.advice SET rating = %s
                         WHERE (source, event_id, market) = (%s, %s, %s)
-                          AND kickoff > now() AND NOT placed""", (rating, *k))
+                          AND kickoff > now() AND NOT placed AND told_at IS NULL""", (rating, *k))
 
 
 def record(cur, ev: dict, market: str, advised: bool, line: float = None,
@@ -92,7 +94,8 @@ def record(cur, ev: dict, market: str, advised: bool, line: float = None,
               odds = EXCLUDED.odds, p_model = EXCLUDED.p_model, model_mean = EXCLUDED.model_mean,
               edge = EXCLUDED.edge, backed = true, code_version = EXCLUDED.code_version,
               advised_at = now()
-            WHERE aces.advice.kickoff > now() AND NOT aces.advice.placed""",
+            WHERE aces.advice.kickoff > now() AND NOT aces.advice.placed
+              AND aces.advice.told_at IS NULL""",
                     {**key, "tour": ev.get("tour"), "kickoff": ev["kickoff"],
                      "league": ev.get("league"), "player_1_id": ev["player_1_id"],
                      "player_1": ev["name_1"], "player_2_id": ev["player_2_id"],
@@ -104,4 +107,4 @@ def record(cur, ev: dict, market: str, advised: bool, line: float = None,
         cur.execute("""
             UPDATE aces.advice SET backed = false, advised_at = now()
              WHERE source = %(source)s AND event_id = %(event_id)s AND market = %(market)s
-               AND backed AND kickoff > now() AND NOT placed""", key)
+               AND backed AND kickoff > now() AND NOT placed AND told_at IS NULL""", key)

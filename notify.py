@@ -2,15 +2,14 @@
 """Telegram messages for the tennis tips, the twin of the possession scraper's
 notify.py - same bot, same chat, with a racket so the two are told apart.
 
-    python notify.py             announce new tips and changed ones
+    python notify.py             announce new tips
     python notify.py --dry-run   print what would be sent, send nothing
     python notify.py --test      one message, to check the wiring
 
-A tip is rewritten on every collection until its match starts, so the
-announcement is only a snapshot: a tip can appear, change side, change stake,
-or be withdrawn when the odds move. aces.advice remembers what Telegram was
-last told (told_side, told_rating, told_at) and the second kind of message
-reports the difference.
+Each tip is announced once and never revised. Until then a collection may
+move or withdraw it unseen; once Telegram has accepted the message (told_at),
+aces/advice.py locks it like a placed one, so the site and the record keep
+what was sent.
 
 Nothing is marked as told until Telegram has accepted the message, so a failed
 send is retried on the next run rather than lost.
@@ -190,16 +189,16 @@ def main():
 
     from aces import db
     conn = db.connect()
-    fresh, moved = new_tips(conn), changed_tips(conn)
-    if not (fresh or moved):
-        log.info("No new tennis tip, nothing changed.")
+    fresh = new_tips(conn)
+    if not fresh:
+        log.info("No new tennis tip.")
         return 0
 
-    messages = (build(fresh) if fresh else []) + (build(moved, changed=True) if moved else [])
+    messages = build(fresh)
     if args.dry_run or not (token and chat):
         if not args.dry_run:
-            log.info("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set - %d new and "
-                     "%d changed tip(s) left unannounced.", len(fresh), len(moved))
+            log.info("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID not set - %d tip(s) left unannounced.",
+                     len(fresh))
         for m in messages:
             print(m, end="\n\n")
         return 0
@@ -207,9 +206,8 @@ def main():
     for m in messages:
         api("sendMessage", token, chat_id=chat, text=m, parse_mode="HTML",
             disable_web_page_preview="true")
-    mark_told(conn, fresh + moved)
-    log.info("Announced %d new and %d changed tip(s) in %d message(s).",
-             len(fresh), len(moved), len(messages))
+    mark_told(conn, fresh)
+    log.info("Announced %d tip(s) in %d message(s).", len(fresh), len(messages))
     return 0
 
 
